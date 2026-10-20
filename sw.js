@@ -1,6 +1,6 @@
 /* Garage service worker: caches the app so it opens with no signal. Bump CACHE when files change. */
-const CACHE = 'bills-garage-v4';
-const ASSETS = ['./', './index.html', './styles.css?v=4', './data.js?v=4', './app.js?v=4', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png', './icon-180.png?v=4', './fonts/bebas-neue-latin-400-normal.woff2', './fonts/public-sans-latin-400-normal.woff2', './fonts/public-sans-latin-500-normal.woff2', './fonts/public-sans-latin-600-normal.woff2', './fonts/public-sans-latin-700-normal.woff2'];
+const CACHE = 'bills-garage-v5';
+const ASSETS = ['./', './index.html', './styles.css?v=5', './data.js?v=5', './app.js?v=5', './manifest.webmanifest', './icon.svg', './loader-poster.jpg', './icon-192.png', './icon-512.png', './icon-180.png?v=5', './fonts/bebas-neue-latin-400-normal.woff2', './fonts/public-sans-latin-400-normal.woff2', './fonts/public-sans-latin-500-normal.woff2', './fonts/public-sans-latin-600-normal.woff2', './fonts/public-sans-latin-700-normal.woff2'];
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
 });
@@ -13,6 +13,7 @@ self.addEventListener('fetch', (e) => {
   const sameOrigin = url.origin === location.origin;
   const fonts = /fonts\.(googleapis|gstatic)\.com$/.test(url.hostname);
   if (!sameOrigin && !fonts) return;
+  if (/\.(mp4|webm)$/.test(url.pathname)) return; // Safari needs range requests for video; let the browser handle it
   e.respondWith(
     caches.match(e.request).then((hit) => {
       const net = fetch(e.request).then((res) => {

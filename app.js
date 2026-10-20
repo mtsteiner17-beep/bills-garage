@@ -38,7 +38,7 @@ function idbDel(store, key) {
 
 const blank = () => ({
   v: 2,
-  settings: { garage: 'My Garage', distUnit: 'mi', leadDays: 14, onboarded: false, notify: false, lastNotify: '', lastBackup: '', backupEvery: 30, backupSnooze: '', firstUse: '', installDismissed: false },
+  settings: { theme: 'shop', swipeHint: false, garage: 'My Garage', distUnit: 'mi', leadDays: 14, onboarded: false, notify: false, lastNotify: '', lastBackup: '', backupEvery: 30, backupSnooze: '', firstUse: '', installDismissed: false },
   machines: [], items: [], logs: [], notes: [], receipts: [], warranties: [], fuel: [], readings: [],
 });
 let S = blank();
@@ -135,6 +135,15 @@ const daysBetween = (a, b) => Math.round((parseD(b) - parseD(a)) / 864e5);
 const fmtDate = (s, withYear) => { if (!s) return ''; const d = parseD(s); const y = withYear || d.getFullYear() !== new Date().getFullYear(); return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(y ? { year: 'numeric' } : {}) }); };
 const num = (v) => { const n = parseFloat(String(v).replace(/[^0-9.\-]/g, '')); return isFinite(n) ? n : null; };
 const fmtN = (n, u) => { if (n == null) return ''; const r = u === 'hrs' ? Math.round(n * 10) / 10 : Math.round(n); return r.toLocaleString() + (u ? ' ' + u : ''); };
+/* 52310 -> 52,310 while typing (keeps a decimal for engine hours) */
+function withCommas(v) {
+  v = String(v ?? '').replace(/[^0-9.]/g, '');
+  if (!v) return '';
+  const [a, ...rest] = v.split('.');
+  const intPart = a.replace(/^0+(?=\d)/, '').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return rest.length ? `${intPart || '0'}.${rest.join('').slice(0, 1)}` : intPart;
+}
+function fmtCommaInputs(root = document) { root.querySelectorAll('input[data-commas]').forEach((i) => { if (i.value) i.value = withCommas(i.value); }); }
 const money = (n) => (n == null || isNaN(n)) ? '' : '$' + Number(n).toLocaleString(undefined, { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 });
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 function humanDays(d) {
@@ -149,7 +158,14 @@ const M = (id) => S.machines.find((m) => m.id === id);
 const I = (id) => S.items.find((i) => i.id === id);
 const unitOf = (m) => m.unit || 'none';
 const hasMeter = (m) => m.unit === 'mi' || m.unit === 'km' || m.unit === 'hrs';
-const isVehicle = (m) => ['car', 'truck', 'motorcycle'].includes(m.cat);
+const NO_METER = ['cat', 'birdfeeder'];
+const VEH_CATS = ['car', 'truck', 'motorcycle', 'camper', 'rv'];
+const isVehicle = (m) => VEH_CATS.includes(m.cat);
+/* time part of an interval: months, or days for short jobs (bird feeders, litter) */
+const hasTime = (ev) => !!(ev && (ev.months || ev.days));
+const dueFrom = (last, ev) => (ev.days ? addDays(last, ev.days) : addMonths(last, ev.months));
+const backDate = (ev) => (ev.days ? addDays(todayISO(), -ev.days) : addMonths(todayISO(), -((ev && ev.months) || 120)));
+const timeText = (ev) => (!ev ? '' : ev.days ? (ev.days % 7 === 0 ? plural(ev.days / 7, 'week') : plural(ev.days, 'day')) : ev.months ? (ev.months % 12 === 0 && ev.months >= 12 ? plural(ev.months / 12, 'year') : plural(ev.months, 'month')) : '');
 
 /* ======================= due engine ======================= */
 function usageRate(m) {
@@ -177,8 +193,8 @@ function itemStatus(it) {
   if (!m) return { state: 'ok', frac: 0, text: '', score: 9 };
   const today = todayISO();
   const useFirst = it.first && !S.logs.some((l) => (l.itemIds || []).includes(it.id) && !l.skipped);
-  const every = useFirst ? { u: it.first.u ?? it.every.u, months: it.first.months ?? it.every.months } : it.every;
-  const sev = m.severe && it.severe ? { u: it.severe.u ?? every.u, months: it.severe.months ?? every.months } : null;
+  const every = useFirst ? { u: it.first.u ?? it.every.u, months: it.first.months ?? it.every.months, days: it.first.days ?? it.every.days } : it.every;
+  const sev = m.severe && it.severe ? { u: it.severe.u ?? every.u, months: it.severe.months ?? every.months, days: every.days } : null;
   const ev = sev || every;
   const out = { state: 'ok', frac: 0, remU: null, remDays: null, dueDate: null, text: '', score: 9 };
   const rate = usageRate(m);
@@ -191,9 +207,9 @@ function itemStatus(it) {
     fracs.push((cur - last) / ev.u);
     if (rate > 0) { const dd = remU / rate; out.estDays = dd; out.dueDate = addDays(today, Math.round(dd)); }
   }
-  if (ev.months) {
+  if (hasTime(ev)) {
     const last = it.lastDate || today;
-    const due = addMonths(last, ev.months);
+    const due = dueFrom(last, ev);
     const total = Math.max(1, daysBetween(last, due));
     out.remDays = daysBetween(today, due);
     fracs.push(daysBetween(last, today) / total);
@@ -205,7 +221,8 @@ function itemStatus(it) {
   const overU = out.remU != null && out.remU <= 0;
   const overD = out.remDays != null && out.remDays <= 0;
   const soonU = out.remU != null && (out.remU <= leadU || (out.estDays != null && out.estDays <= lead));
-  const soonD = out.remDays != null && out.remDays <= lead;
+  const span = hasTime(ev) ? daysBetween(it.lastDate || today, dueFrom(it.lastDate || today, ev)) : 0;
+  const soonD = out.remDays != null && out.remDays <= Math.min(lead, Math.max(1, Math.round(span * 0.25)));
   if (overU || overD) out.state = 'over'; else if (soonU || soonD) out.state = 'soon';
   const snoozed = it.snoozeUntil && it.snoozeUntil > today;
   if (snoozed && out.state !== 'ok') { out.state = 'snoozed'; }
@@ -246,10 +263,10 @@ function itemFromTemplate(m, tp, opts = {}) {
     if (m.unit === 'mi') u = o.mi ?? null;
     if (m.unit === 'km') u = o.mi ? Math.round(o.mi * 1.609 / 500) * 500 : null;
     if (m.unit === 'hrs') u = o.hrs ?? null;
-    return { u, months: o.months ?? null };
+    return { u, months: o.months ?? null, days: o.days ?? null };
   };
   const ev = conv(tp.every);
-  if (!ev.u && !ev.months) ev.months = 12;
+  if (!ev.u && !hasTime(ev)) ev.months = 12;
   return {
     id: uid(), machineId: m.id, key: tp.key, title: tp.title, icon: tp.icon,
     every: ev, severe: conv(tp.severe), first: opts.isNew ? conv(tp.first) : null,
@@ -282,7 +299,7 @@ function render() {
     if (!a) html = vGarage();
     else if (a === 'welcome') html = vWelcome(+b || 1);
     else if (a === 'schedule') html = vSchedule();
-    else if (a === 'profile') html = vProfile();
+    else if (a === 'profile' || a === 'settings') html = vProfile();
     else if (a === 'm' && M(b)) {
       if (c === 'edit') html = vEditMachine(b);
       else if (c === 'specs') html = vSpecs(b);
@@ -301,16 +318,19 @@ function render() {
     else if (a === 'note' && M(b)) html = vNote(b, c);
     else if (a === 'fuel' && M(b)) html = vFuel(b);
     else if (a === 'checklist' && M(b)) html = vChecklist(b, c);
+    else if (a === 'precheck' && M(b)) html = vPrecheck(b);
     else if (a === 'archived') html = vArchived();
     else if (a === 'install') html = vInstall();
     else if (a === 'import') html = vImport();
     else html = vGarage();
   } catch (e) { console.error(e); html = `<div class="screen"><div class="empty"><b>Something went wrong.</b><span>${esc(e.message)}</span><button class="btn secondary" data-act="home">Back to garage</button></div></div>`; }
+  applyTheme();
   app().innerHTML = html;
   if (same) { const sc = app().firstElementChild; if (sc) sc.style.animation = 'none'; app().querySelectorAll('.stagger > *').forEach((x) => (x.style.animation = 'none')); window.scrollTo(0, y); } else window.scrollTo(0, 0);
   const gname = S.settings.garage || 'Garage';
   if (document.title !== gname) { document.title = gname; const mt = document.querySelector('meta[name="apple-mobile-web-app-title"]'); if (mt) mt.content = gname; }
   hydratePhotos(app());
+  fmtCommaInputs(app());
   after.forEach((f) => f()); after = [];
 }
 let after = [];
@@ -327,14 +347,15 @@ function nav(on) {
   return `<nav class="nav">
     <button class="${on === 'garage' ? 'on' : ''}" data-act="go" data-to="#/">${icon('garage', 24)}Garage</button>
     <button class="${on === 'schedule' ? 'on' : ''}" data-act="go" data-to="#/schedule">${icon('calendar', 24)}Schedule</button>
-    <button class="${on === 'profile' ? 'on' : ''}" data-act="go" data-to="#/profile">${icon('person', 24)}Profile</button>
+    <button class="${on === 'profile' ? 'on' : ''}" data-act="go" data-to="#/profile">${icon('settings', 24)}Settings</button>
   </nav>`;
 }
 function chip(it, st) {
   const cls = st.state === 'over' ? 'over' : st.state === 'soon' ? 'warn' : 'ok';
   return `<span class="chip ${cls}">${icon(it.icon, 15)}${esc(shortTitle(it.title))}</span>`;
 }
-function shortTitle(t) { return t.replace(/ change$| & filter$| inspection$| check$/i, '').replace(/^Sharpen /, '').replace(/^Clean & lube /, '').replace(/^Clean /, ''); }
+function shortTitle(t) { t = t.replace(/\s*\(.*?\)/g, ''); const r = shortTitle0(t); return /^[&a-z(]/.test(r) || r.length < 3 ? t.replace(/ & dry| \(.*\)/g, '') : r; }
+function shortTitle0(t) { return t.replace(/ change$| & filter$| inspection$| check$/i, '').replace(/^Sharpen /, '').replace(/^Clean & lube /, '').replace(/^Clean /, ''); }
 function machineCard(m, large) {
   const r = ranked(m.id).filter((x) => x.st.state === 'over' || x.st.state === 'soon').slice(0, large ? 3 : 2);
   const chips = r.length ? r.map((x) => chip(x.it, x.st)).join('') : `<span class="chip ghost">${icon('check', 14)}All good</span>`;
@@ -347,22 +368,29 @@ function machineCard(m, large) {
   </${tag}>`;
 }
 function mrow(it, st, opts = {}) {
+  const html = mrowInner(it, st, opts);
+  if (opts.plain || st.state === 'snoozed') return html;
+  return `<div class="swipe" data-id="${it.id}"><div class="swipe-bg"><span class="sk">${icon('x', 18)}Skip</span><span class="sn">Snooze 1 week${icon('snooze', 18)}</span></div>${html}</div>`;
+}
+function mrowInner(it, st, opts = {}) {
   const m = M(it.machineId);
   const cls = st.state === 'over' ? 'over' : st.state === 'soon' ? 'warn' : '';
   const last = lastLogFor(it.id);
   const meta = last ? `Last ${fmtDate(last.date)}` : it.unknown ? 'Not logged yet' : it.lastDate ? `Since ${fmtDate(it.lastDate)}` : '';
   const logLabel = it.title.length <= 16 ? 'Log ' + it.title.toLowerCase() : 'Log it';
+  /* on a machine's own page the machine name is redundant: show the task title once */
+  const head = opts.showMachine === false ? `<div class="tname">${icon(it.icon, 16)}<span>${esc(it.title)}</span></div>` : `${chip(it, st)}<div class="mname"${st.state === 'over' ? ' style="text-align:left"' : ''}>${esc(m.name)}</div>`;
   if (st.state === 'over' && !opts.plain) {
     return `<div class="mrow urgent" data-act="go" data-to="#/i/${it.id}" role="button" tabindex="0">
-      <div class="top">${chip(it, st)}<div class="mname" style="text-align:left">${esc(opts.showMachine === false ? it.title : m.name)}</div></div>
+      <div class="top">${head}</div>
       <div class="mid"><span class="desc">${esc(st.text)}</span><span class="meta" style="color:#f3c4c4">${esc(meta)}</span></div>
       <div class="bigacts"><button class="logl" data-act="log" data-id="${it.id}">${esc(logLabel)}</button><button class="rbtn lg" data-act="snooze" data-id="${it.id}" aria-label="Snooze">${icon('snooze', 20)}</button></div>
     </div>`;
   }
   return `<div class="mrow" data-act="go" data-to="#/i/${it.id}" role="button" tabindex="0">
-    <div class="top">${chip(it, st)}<div class="mname">${esc(opts.showMachine === false ? it.title : m.name)}</div>
+    <div class="top">${head}
       <div class="acts"><button class="rbtn sm" data-act="snooze" data-id="${it.id}" aria-label="Snooze">${icon('snooze', 14)}</button><button class="logs" data-act="log" data-id="${it.id}">Log</button></div></div>
-    <div class="mid"><span class="desc">${esc(opts.showMachine === false ? st.text : `${it.title} · ${st.text}`)}</span><span class="meta">${esc(meta)}</span></div>
+    <div class="mid"><span class="desc">${esc(st.text)}</span><span class="meta">${esc(meta)}</span></div>
     <div class="bar ${cls}"><i style="width:${Math.round(Math.max(0.03, st.frac) * 100)}%"></i></div>
   </div>`;
 }
@@ -378,11 +406,11 @@ function vWelcome(n) {
     after.push(setupHero);
     return `<div class="screen stagger">
       <div class="hero" id="hero">
-        <div class="iconlane"><div class="track">${['mower', 'generator', 'tractor', 'motorcycle', 'washer', 'splitter', 'truck', 'car', 'mower', 'generator', 'tractor', 'motorcycle', 'washer', 'splitter', 'truck', 'car'].map((a) => art(a, 120)).join('')}</div></div>
+        <div class="iconlane"><div class="track">${['mower', 'camper', 'generator', 'tractor', 'motorcycle', 'washer', 'truck', 'ebike', 'mower', 'camper', 'generator', 'tractor', 'motorcycle', 'washer', 'truck', 'ebike'].map((a) => art(a, 120)).join('')}</div></div>
         <div class="floor"></div>
       </div>
       <h1 class="big-title">Keep every machine running</h1>
-      <p class="note">Track maintenance, receipts and warranties for your trucks, mowers, generators and everything else in one place.</p>
+      <p class="note">Maintenance, receipts and warranties for trucks, campers, mowers and everything else.</p>
       <div class="spacer"></div>
       <div class="actions-bottom"><button class="btn primary" data-act="go" data-to="#/welcome/2">Get started</button>
       <button class="btn text" data-act="restore-start">Restore from a backup file</button></div>
@@ -390,20 +418,21 @@ function vWelcome(n) {
   }
   if (n === 2) return `<div class="screen stagger">
     ${topBar('', '#/welcome/1')}${steps(4, 1)}
-    <div class="list">${demoRow('over')}${demoRow('ok')}</div>
+    <div class="demo-frame" aria-hidden="true">${demoRow('over')}${demoRow('ok')}</div>
     <h2 class="headline">Never miss a service</h2>
-    <p class="note">Reminders by miles, engine hours or date, whichever comes first. It learns how much you use each machine and estimates when things are due.</p>
+    <p class="note">Reminders by miles, hours or date, whichever comes first. It learns how much you use each machine.</p>
     <div class="spacer"></div>
     <div class="actions-bottom"><button class="btn primary" data-act="go" data-to="#/welcome/3">Next</button><button class="btn text" data-act="go" data-to="#/welcome/4">Skip</button></div>
   </div>`;
   if (n === 3) return `<div class="screen stagger">
     ${topBar('', '#/welcome/2')}${steps(4, 2)}
     <h2 class="headline">Everything in one spot</h2>
-    <p class="note">Service history, receipts, warranties, notes and part numbers live with each machine. It all stays on this phone, even with no signal in the garage.</p>
-    <div class="group">
-      <div class="lrow"><div class="ibox">${icon('receipt', 18)}</div><div class="grow"><div class="t">Snap receipts</div><div class="d">Photo it and attach it to the job</div></div></div>
-      <div class="lrow"><div class="ibox">${icon('shield', 18)}</div><div class="grow"><div class="t">Warranty countdowns</div><div class="d">Know before coverage runs out</div></div></div>
-      <div class="lrow"><div class="ibox">${icon('oil', 18)}</div><div class="grow"><div class="t">Part numbers saved</div><div class="d">Oil type, filters and plugs per machine</div></div></div>
+    <p class="note">History, receipts, warranties and part numbers live with each machine, on this phone, even with no signal.</p>
+    <div class="stack" style="gap:6px">
+      <div class="feat"><span class="fi">${icon('receipt', 22)}</span><div><div class="t">Snap receipts</div><div class="d">Attach them to the job</div></div></div>
+      <div class="feat"><span class="fi">${icon('shield', 22)}</span><div><div class="t">Warranty countdowns</div><div class="d">Know before coverage runs out</div></div></div>
+      <div class="feat"><span class="fi">${icon('checks', 22)}</span><div><div class="t">Pre-trip checklists</div><div class="d">Run through it before you head out</div></div></div>
+      <div class="feat"><span class="fi">${icon('oil', 22)}</span><div><div class="t">Part numbers saved</div><div class="d">Oil, filters and plugs per machine</div></div></div>
     </div>
     <div class="spacer"></div>
     <div class="actions-bottom"><button class="btn primary" data-act="go" data-to="#/welcome/4">Next</button><button class="btn text" data-act="go" data-to="#/welcome/4">Skip</button></div>
@@ -414,9 +443,10 @@ function vWelcome(n) {
     return `<div class="screen stagger">
     ${topBar('', '#/welcome/3')}${steps(4, 3)}
     <h2 class="headline">Name your garage</h2>
-    <p class="note">This shows at the top of the app and on your Home Screen icon. You can change it anytime in Profile.</p>
+    <p class="note">Shows at the top of the app and under the Home Screen icon.</p>
     <input class="inp bebas" id="garageName" value="${esc(cur)}" placeholder="e.g. Bill's Garage" maxlength="28" autocapitalize="words" enterkeyhint="next" style="font-size:36px;height:72px;text-transform:uppercase">
     <div class="picks">${["The Shop", "The Pole Barn", "Shed HQ", "Dad's Garage", "The Back 40"].map((x) => `<button class="pick" data-act="name-pick" data-v="${esc(x)}">${esc(x)}</button>`).join('')}</div>
+    <div class="field" style="margin-top:6px"><span>Pick a look</span>${themePicker(true)}</div>
     <div class="spacer"></div>
     <div class="actions-bottom"><button class="btn primary" data-act="onb-name">Next</button></div>
   </div>`;
@@ -425,7 +455,7 @@ function vWelcome(n) {
   return `<div class="screen stagger">
     ${topBar('', '#/welcome/4')}${steps(4, 4)}
     <h2 class="headline">${standalone ? 'Stay on schedule' : 'Put it on your Home Screen'}</h2>
-    ${standalone ? `<p class="note">Turn on reminders and the app will give you a heads-up when you open it and something is due.</p>` : `<p class="note">It works like a real app from there: full screen, works offline, and reminders can show up. Do this <b style="color:#fff">before</b> you add anything, because the Home Screen app keeps its own data.</p>
+    ${standalone ? `<p class="note">Get a heads-up when something is due.</p>` : `<p class="note">Full screen, works offline, reminders can show up. Do this <b style="color:#fff">before</b> adding anything: the Home Screen app keeps its own data.</p>
     ${installSteps(detectPlatform(), true)}`}
     <div class="spacer"></div>
     <div class="actions-bottom">
@@ -464,23 +494,24 @@ function detectPlatform() {
 }
 const IOS_SHARE = '<svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M6 11H5v10h14V11h-1"/></svg>';
 function installSteps(pf, compact) {
-  const step = (n, t, d, demo) => `<div class="istep"><div class="n">${n}</div><div class="grow"><div class="t">${t}</div>${d ? `<div class="d">${d}</div>` : ''}${demo || ''}</div></div>`;
+  const step = (n, t, d) => `<div class="istep"><div class="n">${n}</div><div class="grow"><div class="t">${t}</div>${d ? `<div class="d">${d}</div>` : ''}</div></div>`;
+  const SH = `<span class="kbd">${IOS_SHARE}</span>`, ADD = `<span class="kbd" style="color:#fff">${icon('squareplus', 16)}</span>`;
   if (pf === 'android' || pf === 'desktop') {
     return `<div class="stack">${installEvt ? `<button class="btn primary" data-act="install-now">${icon('download', 18)}Install the app</button>` : ''}
-      ${step(1, 'Open the Chrome menu', 'The three dots at the top right.', `<span class="demo plain">${icon('more', 16)}</span>`)}
-      ${step(2, 'Tap “Add to Home screen” or “Install app”', '', `<span class="demo plain">${icon('phone', 16)}Install app</span>`)}
+      ${step(1, `Open the Chrome menu <span class="kbd" style="color:#fff">${icon('more', 16)}</span>`, 'Three dots, top right.')}
+      ${step(2, 'Tap “Add to Home screen” or “Install app”', '')}
       ${step(3, 'Tap Install', 'The icon shows up with your other apps.')}</div>`;
   }
   if (pf === 'ios-chrome') {
     return `<div class="stack">
-      ${step(1, 'Tap the Share button', 'In Chrome it’s at the top right, next to the address bar.', `<span class="demo">${IOS_SHARE} Share</span>`)}
-      ${step(2, 'Tap “Add to Home Screen”', 'You may need to scroll down the list.', `<span class="demo plain">${icon('squareplus', 16)} Add to Home Screen</span>`)}
-      ${step(3, 'Tap Add', 'Then open the app from the new icon, not from Chrome.')}
+      ${step(1, `Tap Share ${SH}`, 'Top right, next to the address bar.')}
+      ${step(2, `Tap Add to Home Screen ${ADD}`, 'Scroll down if you don’t see it.')}
+      ${step(3, 'Tap Add', 'Then open it from the new icon, not from Chrome.')}
       ${compact ? '' : `<p class="note">Safari works best on iPhone for reminders. Same steps: open this site in Safari, tap Share (or ··· then Share), then Add to Home Screen.</p>`}</div>`;
   }
   return `<div class="stack">
-    ${step(1, 'Tap the Share button', 'At the bottom of Safari. On newer iPhones, tap ··· first, then Share.', `<span class="demo">${IOS_SHARE} Share</span>`)}
-    ${step(2, 'Tap “Add to Home Screen”', 'Scroll down the list if you don’t see it.', `<span class="demo plain">${icon('squareplus', 16)} Add to Home Screen</span>`)}
+    ${step(1, `Tap Share ${SH}`, 'Bottom of Safari. On newer iPhones, tap ··· first.')}
+    ${step(2, `Tap Add to Home Screen ${ADD}`, 'Scroll down if you don’t see it.')}
     ${step(3, 'Leave “Open as Web App” on, tap Add', 'Then open it from the new icon from now on.')}
   </div>`;
 }
@@ -492,7 +523,7 @@ function vInstall() {
     ${isStandalone() ? `<div class="nudge"><div class="ibox" style="background:rgba(18,255,84,.15);color:var(--green)">${icon('check', 20)}</div><div class="grow"><div class="t">You’re already using the Home Screen app</div><div class="d">Nothing else to do.</div></div></div>` : ''}
     <div class="seg">${tabs.map(([k, l]) => `<button class="${(pf === k || (pf === 'ios-other' && k === 'ios-safari') || (pf === 'desktop' && k === 'android')) ? 'on' : ''}" data-act="install-tab" data-v="${k}" style="font-size:13px">${l}</button>`).join('')}</div>
     ${installSteps(pf)}
-    <div class="callout"><b>Heads up:</b> the Home Screen app keeps its own copy of your data, separate from the browser. If you already logged things in the browser, back up here first, then open the new icon and use Profile → Restore.</div>
+    <div class="callout"><b>Heads up:</b> the Home Screen app keeps its own data. Already logged things here? Back up first, then Restore inside the new app.</div>
     ${S.machines.length ? `<button class="btn secondary" data-act="backup">${icon('save', 18)}Back up what’s here first</button>` : ''}
   </div>`;
 }
@@ -515,6 +546,7 @@ function vGarage() {
     if (d >= 0 && d <= 60) nudges.push(`<button class="nudge warn" data-act="go" data-to="#/m/${m.id}/warranty"><div class="ibox">${icon('shield', 20)}</div><div class="grow"><div class="t">Warranty ends in ${humanDays(d)}</div><div class="d">${esc(m.name)} · ${esc(w.coverage || w.provider || 'Coverage')}</div></div></button>`);
   });
   if (ms.length && !isStandalone() && !S.settings.installDismissed) nudges.push(`<div class="nudge"><button class="row grow" style="text-align:left" data-act="go" data-to="#/install"><div class="ibox">${icon('squareplus', 20)}</div><div class="grow"><div class="t">Add to your Home Screen</div><div class="d">Opens like an app and keeps your data safer</div></div></button><button class="rbtn sm" data-act="install-dismiss" aria-label="Dismiss">${icon('x', 14)}</button></div>`);
+  if (r.length && !S.settings.swipeHint) after.push(() => setTimeout(() => { toast('Tip: swipe a task left to snooze, right to skip'); S.settings.swipeHint = true; save(); }, 900));
   const recallM = ms.filter((m) => m.recalls && m.recalls.length && !m.recallsSeen);
   recallM.forEach((m) => nudges.push(`<button class="nudge alert" data-act="go" data-to="#/m/${m.id}/recalls"><div class="ibox">${icon('alert', 20)}</div><div class="grow"><div class="t">${plural(m.recalls.length, 'recall')} found</div><div class="d">${esc(m.name)} · tap to review</div></div></button>`));
 
@@ -561,10 +593,12 @@ function machineUpcoming(m) {
   const r = ranked(m.id);
   const paused = S.items.filter((i) => i.machineId === m.id && i.enabled === false);
   if (!r.length) return empty('wrench', 'No maintenance tracked', 'Pick from suggestions for this machine or add your own.', `<button class="btn primary" data-act="go" data-to="#/m/${m.id}/add-maint" style="width:auto;padding:0 24px">Add maintenance</button>`);
-  return `<div class="list">${r.map((x) => mrow(x.it, x.st, { showMachine: false })).join('')}</div>
+  const pc = PRECHECKS[m.cat];
+  return `${pc && !NO_METER.includes(m.cat) ? `<button class="lrow" data-act="go" data-to="#/precheck/${m.id}"><div class="ibox">${icon('checks', 18)}</div><div class="grow"><div class="t">${esc(pc.title)}</div><div class="d">${plural(pc.items.length, 'item')} · before you head out</div></div>${icon('back', 16, 'flip')}</button>` : ''}
+    <div class="list">${r.map((x) => mrow(x.it, x.st, { showMachine: false })).join('')}</div>
     <button class="dashed" data-act="go" data-to="#/m/${m.id}/add-maint">${icon('plus', 18)}Add maintenance</button>
-    ${m.cat === 'cat' ? '' : `<div class="sec-title">Seasonal checklists</div>
-    <div class="group">${Object.entries(CHECKLISTS).map(([k, c]) => `<button class="lrow" data-act="go" data-to="#/checklist/${m.id}/${k}"><div class="ibox">${icon(c.icon, 18)}</div><div class="grow"><div class="t">${c.title}</div><div class="d">${c.items.length} steps · logs as one entry</div></div></button>`).join('')}</div>
+    ${NO_METER.includes(m.cat) ? '' : `<div class="sec-title">Seasonal checklists</div>
+    <div class="group">${Object.entries(CHECKLISTS).map(([k, c]) => `<button class="lrow" data-act="go" data-to="#/checklist/${m.id}/${k}"><div class="ibox">${icon(c.icon, 18)}</div><div class="grow"><div class="t">${c.title}</div><div class="d">${c.items.length} steps</div></div></button>`).join('')}</div>
     <button class="lrow" data-act="go" data-to="#/m/${m.id}/specs"><div class="ibox">${icon('oil', 18)}</div><div class="grow"><div class="t">Specs & part numbers</div><div class="d">${specSummary(m) || 'Oil type, filters, plugs, tire sizes'}</div></div></button>`}
     ${paused.length ? `<p class="note">${plural(paused.length, 'item')} turned off. <button class="link muted" style="text-decoration:underline" data-act="go" data-to="#/m/${m.id}/add-maint">Manage</button></p>` : ''}`;
 }
@@ -613,7 +647,7 @@ function vItem(id) {
   const it = I(id), m = M(it.machineId), st = itemStatus(it);
   const u = UNIT_LABEL[m.unit];
   const ev = it.every;
-  const evText = [ev.u ? `every ${fmtN(ev.u, u)}` : '', ev.months ? `every ${plural(ev.months, 'month')}` : ''].filter(Boolean).join(' or ');
+  const evText = [ev.u ? `every ${fmtN(ev.u, u)}` : '', hasTime(ev) ? `every ${timeText(ev)}` : ''].filter(Boolean).join(' or ');
   const hist = S.logs.filter((l) => (l.itemIds || []).includes(it.id)).sort((a, b) => b.date.localeCompare(a.date));
   const specs = m.specs || {};
   const need = [...(it.need || [])];
@@ -625,9 +659,9 @@ function vItem(id) {
   return `<div class="screen">
     <div class="hdr sticky"><div class="left">${backBtn('#/m/' + m.id)}<div class="h-title sm" style="opacity:.0" id="itemHdrTitle">${esc(it.title)}</div></div><div class="h-actions"><button class="rbtn" data-act="item-menu" data-id="${it.id}" aria-label="More">${icon('more', 18)}</button></div></div>
     <div class="photo-hero">${art(m.cat, 110)}${photoTag(m.photoId)}</div>
-    <div><h1 class="big-title">${esc(it.title)}</h1><p class="note" style="margin-top:6px">${esc(m.name)} · ${esc(evText || 'no interval')}${m.severe && it.severe ? ' · severe duty' : ''}</p></div>
-    ${mrow(it, st, { plain: true })}
-    ${st.state === 'over' ? `<div class="two"><button class="btn primary" data-act="log" data-id="${it.id}">Log it</button><button class="btn secondary" data-act="snooze" data-id="${it.id}">Snooze</button></div>` : ''}
+    <div><h1 class="big-title">${esc(it.title)}</h1><p class="note" style="margin-top:6px">${esc(m.name)}${m.severe && it.severe ? ' · severe duty' : ''}</p></div>
+    <div class="status ${st.state}"><div class="row between"><b>${esc(st.text)}</b>${st.dueDate && st.state !== 'over' ? `<span class="muted">${fmtDate(st.dueDate, true)}</span>` : ''}</div><div class="bar ${st.state === 'over' ? 'over' : st.state === 'soon' ? 'warn' : ''}"><i style="width:${Math.round(Math.max(0.03, st.frac) * 100)}%"></i></div></div>
+    <div class="two"><button class="btn primary" data-act="log" data-id="${it.id}">Log it</button><button class="btn secondary" data-act="snooze" data-id="${it.id}">Snooze</button></div>
     <div class="sched">
       <button class="lrow" data-act="sched" data-id="${it.id}"><div class="ibox">${icon('history', 18)}</div><div class="grow"><div class="t">Repeats</div><div class="d">${esc(evText ? evText[0].toUpperCase() + evText.slice(1) : 'No interval set')}${hasMeter(m) && ev.u && ev.months ? ', whichever first' : ''}</div></div><span class="pill-tag">Change</span></button>
       <button class="lrow" data-act="sched" data-id="${it.id}"><div class="ibox">${icon('calendar', 18)}</div><div class="grow"><div class="t">Last done</div><div class="d">${it.unknown && !hist.length ? 'Not sure yet · set it so reminders are right' : fmtDate(it.lastDate, true) + (hasMeter(m) && it.lastReading != null ? ' at ' + fmtN(it.lastReading, u) : '')}</div></div><span class="pill-tag">Change</span></button>
@@ -653,7 +687,6 @@ const specLabel = (k) => (SPEC_FIELDS.find((f) => f[0] === k) || [k, k])[1];
 function vSpecs(id) {
   const m = M(id), s = m.specs || {};
   return `<div class="screen">${topBar('Specs & parts', '#/m/' + id)}
-    <p class="note">Save these once and they show up on every job that needs them.</p>
     ${SPEC_FIELDS.map(([k, l, ph]) => field(l, k === 'other' ? `<textarea class="inp" id="sp_${k}" placeholder="${esc(ph)}" style="height:96px">${esc(s[k] || '')}</textarea>` : inp('sp_' + k, s[k], ph))).join('')}
     <div class="actions-bottom"><button class="btn primary" data-act="save-specs" data-id="${id}">Save specs</button></div>
   </div>`;
@@ -672,21 +705,26 @@ function vAdd(step) {
       ${Object.entries(groups).map(([g, list]) => `<div class="grouplabel">${esc(g)}</div><div class="catgrid">${list.map(([k, c]) => `<button class="cat ${draft.cat === k ? 'on' : ''}" data-act="pick-cat" data-cat="${k}">${art(k, 44)}<span>${esc(c.label)}</span></button>`).join('')}</div>`).join('')}
     </div>`;
   }
+  if (step === 2 && draft.cat === 'birdfeeder') {
+    return `<div class="screen">${topBar('Add a bird feeder', '#/add/1')}${steps(4, 2)}
+      ${field('Name', inp('name', draft.name, 'e.g. Back porch feeder'))}
+      ${field('Type (optional)', inp('make', draft.make, 'e.g. Tube, hopper, hummingbird'))}
+      <div class="spacer"></div>
+      <div class="actions-bottom"><button class="btn primary" data-act="add-next-2">Continue</button></div>
+    </div>`;
+  }
   if (step === 2 && draft.cat === 'cat') {
     return `<div class="screen">${topBar('Add a cat', '#/add/1')}${steps(4, 2)}
-      <h2 class="headline">Who’s this?</h2>
-      <p class="note">Same reminders, fewer spark plugs.</p>
-      ${field('Name', inp('name', draft.name, 'e.g. Mr. Whiskers'))}
-      <div class="two">${field('Breed', inp('make', draft.make, 'e.g. Barn cat'))}${field('Color', inp('model', draft.model, 'e.g. Orange'))}</div>
-      ${field('Born (year)', inp('year', draft.year, 'Year', 'number', 'inputmode="numeric"'))}
+      ${field('Name', inp('name', draft.name, 'e.g. Milo'))}
+      <div class="two">${field('Breed', inp('make', draft.make, 'e.g. Domestic shorthair'))}${field('Color', inp('model', draft.model, 'e.g. Orange tabby'))}</div>
+      ${field('Birth year', inp('year', draft.year, 'Year', 'number', 'inputmode="numeric"'))}
       <div class="spacer"></div>
       <div class="actions-bottom"><button class="btn primary" data-act="add-next-2">Continue</button></div>
     </div>`;
   }
   if (step === 2) {
-    const veh = ['car', 'truck', 'motorcycle'].includes(draft.cat);
+    const veh = VEH_CATS.includes(draft.cat);
     return `<div class="screen">${topBar('Add machine', '#/add/1')}${steps(4, 2)}
-      <h2 class="headline">Tell us about it</h2>
       ${veh ? `<div class="card dark stack"><div class="t" style="font-weight:600">Have the VIN?</div><p class="note" style="margin:0">We'll fill in year, make and model. It's on the driver's door jamb or the dash by the windshield.</p><div class="row">${inp('vin', draft.vin, '17-character VIN', 'text', 'autocapitalize="characters" maxlength="17" style="text-transform:uppercase"')}<button class="smallbtn" style="height:46px;padding:0 16px" data-act="decode-vin">Look up</button></div><div id="vinmsg" class="note"></div></div>` : ''}
       ${field('Nickname', inp('name', draft.name, veh ? 'e.g. Dad’s F-150' : 'e.g. Back-yard mower'))}
       <div class="two">${field('Make', inp('make', draft.make, 'Brand'))}${field('Model', inp('model', draft.model, 'Model'))}</div>
@@ -703,48 +741,54 @@ function vAdd(step) {
       <h2 class="headline">${unit === 'hrs' ? 'Current engine hours' : unit === 'none' ? 'How do you track it?' : 'Current odometer'}</h2>
       <p class="note">This is what reminders count from. ${unit === 'hrs' ? 'Look for the hour meter near the seat or dash.' : ''}</p>
       <div class="seg">${[['mi', 'Miles'], ['km', 'Km'], ['hrs', 'Hours'], ['none', 'Time only']].filter(([k]) => ['car', 'truck', 'motorcycle'].includes(draft.cat) ? k !== 'hrs' || true : true).map(([k, l]) => `<button class="${unit === k ? 'on' : ''}" data-act="draft-unit" data-unit="${k}">${l}</button>`).join('')}</div>
-      ${unit !== 'none' ? `<div class="card dark" style="text-align:center"><input class="inp bebas" id="reading" inputmode="decimal" value="${esc(draft.reading)}" placeholder="0" style="font-size:56px;height:84px;text-align:center;background:transparent"><div class="muted">${unit === 'hrs' ? 'hours' : unit === 'km' ? 'kilometers' : 'miles'}</div></div>` : `<p class="note">Reminders will go by date only (good for trailers and electric tools).</p>`}
+      ${unit !== 'none' ? `<div class="card dark" style="text-align:center"><input class="inp bebas" id="reading" inputmode="numeric" data-commas value="${esc(draft.reading)}" placeholder="0" style="font-size:56px;height:84px;text-align:center;background:transparent"><div class="muted">${unit === 'hrs' ? 'hours' : unit === 'km' ? 'kilometers' : 'miles'}</div></div>` : `<p class="note">Reminders will go by date only (good for trailers and electric tools).</p>`}
       <div class="spacer"></div>
       <div class="actions-bottom"><button class="btn primary" data-act="add-next-3" data-unit="${unit}">Continue</button></div>
     </div>`;
   }
   const c = CATS[draft.cat] || CATS.other;
   const unit = draft.unit;
-  return `<div class="screen">${topBar(draft.cat === 'cat' ? 'Add a cat' : 'Add machine', draft.cat === 'cat' ? '#/add/2' : '#/add/3')}${steps(4, 4)}
+  return `<div class="screen">${topBar(draft.cat === 'cat' ? 'Add a cat' : draft.cat === 'birdfeeder' ? 'Add a bird feeder' : 'Add machine', NO_METER.includes(draft.cat) ? '#/add/2' : '#/add/3')}${steps(4, 4)}
     <div class="photo-hero" style="height:200px" id="draftPhoto">${art(draft.cat, 120)}${photoTag(draft.photoId)}</div>
     <label class="btn secondary" style="cursor:pointer">${icon('camera', 18)}${draft.photoId ? 'Change photo' : 'Add a photo (optional)'}<input type="file" accept="image/*" hidden data-change="draft-photo"></label>
     <div class="card">
       <div class="kv"><span>Name</span><b>${esc(draft.name)}</b></div>
       <div class="kv"><span>Type</span><span>${esc(c.label)}</span></div>
       ${draft.make || draft.model ? `<div class="kv"><span>Make & model</span><span>${esc([draft.year, draft.make, draft.model].filter(Boolean).join(' '))}</span></div>` : ''}
-      ${draft.serial ? `<div class="kv"><span>${['car', 'truck', 'motorcycle'].includes(draft.cat) ? 'VIN' : 'Serial'}</span><span>${esc(draft.serial)}</span></div>` : ''}
-      ${draft.cat === 'cat' ? '' : `<div class="kv"><span>${unit === 'hrs' ? 'Hours' : unit === 'none' ? 'Tracking' : 'Odometer'}</span><span>${unit === 'none' ? 'By date' : fmtN(num(draft.reading) || 0, UNIT_LABEL[unit])}</span></div>`}
+      ${draft.serial ? `<div class="kv"><span>${VEH_CATS.includes(draft.cat) ? 'VIN' : 'Serial'}</span><span>${esc(draft.serial)}</span></div>` : ''}
+      ${NO_METER.includes(draft.cat) ? '' : `<div class="kv"><span>${unit === 'hrs' ? 'Hours' : unit === 'none' ? 'Tracking' : 'Odometer'}</span><span>${unit === 'none' ? 'By date' : fmtN(num(draft.reading) || 0, UNIT_LABEL[unit])}</span></div>`}
     </div>
     <div class="spacer"></div>
-    <div class="actions-bottom"><button class="btn primary" data-act="add-save">${draft.cat === 'cat' ? 'Add to the garage' : 'Add machine'}</button><button class="btn text" data-act="go" data-to="#/add/2">Edit details</button></div>
+    <div class="actions-bottom"><button class="btn primary" data-act="add-save">${draft.cat === 'cat' ? 'Add cat' : draft.cat === 'birdfeeder' ? 'Add bird feeder' : 'Add machine'}</button><button class="btn text" data-act="go" data-to="#/add/2">Edit details</button></div>
   </div>`;
 }
 function vAdded(id) {
   const m = M(id);
   return `<div class="screen">${topBar('', '#/m/' + id)}
-    <div class="center"><div class="success">${icon(m.cat === 'cat' ? 'cat' : 'check', 44)}</div><h1 class="big-title">${m.cat === 'cat' ? 'Cat added' : 'Machine added'}</h1><p class="note">${m.cat === 'cat' ? `${esc(m.name)} is now officially garage equipment. Low mileage, high maintenance.` : `${esc(m.name)} is in your garage.`}</p></div>
-    <div class="card row"><div class="lrow" style="padding:0;background:none"><div class="ibox">${icon('wrench', 18)}</div><div class="grow"><div class="t">Set up its maintenance?</div><div class="d">We'll suggest a starting schedule for a ${esc((CATS[m.cat] || CATS.other).label.toLowerCase())}.</div></div></div></div>
-    <div class="actions-bottom"><button class="btn primary" data-act="go" data-to="#/suggest/${id}">See suggested maintenance</button><button class="btn text" data-act="go" data-to="#/m/${id}">Later</button></div>
+    <div class="center"><div class="success">${icon(m.cat === 'cat' ? 'cat' : m.cat === 'birdfeeder' ? 'bird' : 'check', 44)}</div><h1 class="big-title">${esc(m.name)}</h1><p class="note">Added to ${esc(S.settings.garage)}.</p></div>
+    <div class="actions-bottom"><button class="btn primary" data-act="go" data-to="#/suggest/${id}">Set up maintenance</button><button class="btn text" data-act="go" data-to="#/m/${id}">Later</button></div>
   </div>`;
 }
-let suggestSel = null;
+let suggestSel = null, customReturn = null;
+/* toggle row: tap the text to edit the interval, tap the switch to turn it on/off */
+function srow(ic, title, sub, editAttrs, swAttrs, on) {
+  return `<div class="trow srow"><button class="srow-main" ${editAttrs}><div class="ibox">${icon(ic, 18)}</div><div class="grow"><div class="t">${esc(title)}</div><div class="d">${esc(sub)}<span class="edit-hint">${icon('edit', 12)}</span></div></div></button><button class="srow-sw" ${swAttrs} aria-label="On or off"><span class="switch ${on ? 'on' : ''}"></span></button></div>`;
+}
 function vSuggest(id) {
   const m = M(id);
   const tps = templatesFor(m);
-  if (!suggestSel || suggestSel.id !== id) suggestSel = { id, on: Object.fromEntries(tps.map((tp) => [tp.key, true])), last: 'now' };
+  if (!suggestSel || suggestSel.id !== id) suggestSel = { id, on: Object.fromEntries(tps.map((tp) => [tp.key, !tp.off])), over: {}, last: 'now' };
   if (!tps.length) { after.push(() => go('#/custom/' + id)); return '<div class="screen"></div>'; }
+  const customs = S.items.filter((i) => i.machineId === id && !i.key);
   return `<div class="screen">${topBar('Suggested maintenance', '#/m/' + id)}
-    <p class="note">Based on a typical ${esc((CATS[m.cat] || CATS.other).label.toLowerCase())}. Turn off anything you don't need. You can edit every interval later to match your owner's manual.</p>
-    <div class="list">${tps.map((tp) => { const tmp = itemFromTemplate(m, tp); return `<button class="trow" data-act="sug-toggle" data-key="${tp.key}"><div class="ibox" style="width:36px;height:36px;border-radius:50%;background:var(--btn);display:grid;place-items:center">${icon(tp.icon, 18)}</div><div class="grow"><div class="t">${esc(tp.title)}</div><div class="d">${esc(intervalText(tmp, m))}</div></div><span class="switch ${suggestSel.on[tp.key] ? 'on' : ''}"></span></button>`; }).join('')}</div>
-    <div class="card dark stack"><div style="font-weight:600">When was this stuff last done?</div>
+    <p class="note">Starting points for a typical ${esc((CATS[m.cat] || CATS.other).label.toLowerCase())}. Tap any item to change how often.</p>
+    <div class="list">${tps.map((tp) => { const tmp = itemFromTemplate(m, tp); if (suggestSel.over[tp.key]) tmp.every = suggestSel.over[tp.key]; return srow(tp.icon, tp.title, intervalText(tmp, m), `data-act="sug-edit" data-id="${id}" data-key="${tp.key}"`, `data-act="sug-toggle" data-key="${tp.key}"`, suggestSel.on[tp.key]); }).join('')}
+      ${customs.map((i) => srow(i.icon, i.title, intervalText(i, m), `data-act="sched" data-id="${i.id}"`, `data-act="item-toggle" data-id="${i.id}"`, i.enabled !== false)).join('')}</div>
+    <button class="dashed" data-act="custom-from" data-id="${id}" data-back="#/suggest/${id}">${icon('plus', 18)}Add custom</button>
+    <div class="card dark stack"><div style="font-weight:600">When was this last done?</div>
       <div class="seg"><button class="${suggestSel.last === 'now' ? 'on' : ''}" data-act="sug-last" data-v="now">Recently</button><button class="${suggestSel.last === 'date' ? 'on' : ''}" data-act="sug-last" data-v="date">Pick a date</button><button class="${suggestSel.last === 'unknown' ? 'on' : ''}" data-act="sug-last" data-v="unknown">Not sure</button></div>
-      ${suggestSel.last === 'date' ? `<div class="${hasMeter(m) ? 'two' : ''}">${field('Date', inp('sg_date', suggestSel.date || addMonths(todayISO(), -3), '', 'date'))}${hasMeter(m) ? field(`At (${UNIT_LABEL[m.unit]}, optional)`, inp('sg_r', suggestSel.reading || '', 'Best guess', 'number', 'inputmode="decimal"')) : ''}</div>` : ''}
-      <p class="note" style="margin:0">${suggestSel.last === 'now' ? 'Reminders count from today.' : suggestSel.last === 'date' ? 'Everything counts from that date. You can fine-tune each one later.' : 'Everything starts as due so you can log what you do and reset it.'}</p></div>
+      ${suggestSel.last === 'date' ? `<div class="${hasMeter(m) ? 'two' : ''}">${field('Date', inp('sg_date', suggestSel.date || addMonths(todayISO(), -3), '', 'date'))}${hasMeter(m) ? field(`At (${UNIT_LABEL[m.unit]})`, inp('sg_r', suggestSel.reading || '', 'Best guess', 'text', 'inputmode="numeric" data-commas')) : ''}</div>` : ''}
+      ${suggestSel.last === 'unknown' ? `<p class="note" style="margin:0">Everything starts as due. Log what you do to reset it.</p>` : ''}</div>
     <div class="actions-bottom"><button class="btn primary" data-act="sug-save" data-id="${id}">Use this schedule</button><button class="btn text" data-act="go" data-to="#/m/${id}">Skip for now</button></div>
   </div>`;
 }
@@ -752,7 +796,7 @@ function intervalText(it, m) {
   const u = UNIT_LABEL[m.unit];
   const p = [];
   if (it.every.u) p.push(`Every ${fmtN(it.every.u, u)}`);
-  if (it.every.months) p.push(`${p.length ? 'or ' : 'Every '}${plural(it.every.months, 'month')}`);
+  if (hasTime(it.every)) p.push(`${p.length ? 'or ' : 'Every '}${timeText(it.every)}`);
   return p.join(' ') + (it.first && (it.first.u || it.first.months) ? ` · first at ${it.first.u ? fmtN(it.first.u, u) : plural(it.first.months, 'month')}` : '');
 }
 function vAddMaint(id) {
@@ -760,30 +804,27 @@ function vAddMaint(id) {
   const mine = S.items.filter((i) => i.machineId === id);
   const tps = templatesFor(m);
   return `<div class="screen">${topBar('Add maintenance', '#/m/' + id)}
-    <p class="note">Pick what to track on ${esc(m.name)}. Turn on anything you want to add.</p>
     <div class="list">
-      ${mine.map((i) => `<div class="trow"><button class="grow" style="text-align:left" data-act="sched" data-id="${i.id}"><div class="t">${esc(i.title)}</div><div class="d">${esc(intervalText(i, m))} · <u>edit</u></div></button><button data-act="item-toggle" data-id="${i.id}" aria-label="On or off"><span class="switch ${i.enabled !== false ? 'on' : ''}"></span></button></div>`).join('')}
-      ${tps.filter((tp) => !mine.some((i) => i.key === tp.key)).map((tp) => { const tmp = itemFromTemplate(m, tp); return `<button class="trow" data-act="tpl-add" data-id="${id}" data-key="${tp.key}"><div class="grow"><div class="t">${esc(tp.title)}</div><div class="d">${esc(intervalText(tmp, m))}</div></div><span class="switch"></span></button>`; }).join('')}
+      ${mine.map((i) => srow(i.icon, i.title, intervalText(i, m), `data-act="sched" data-id="${i.id}"`, `data-act="item-toggle" data-id="${i.id}"`, i.enabled !== false)).join('')}
+      ${tps.filter((tp) => !mine.some((i) => i.key === tp.key)).map((tp) => srow(tp.icon, tp.title, intervalText(itemFromTemplate(m, tp), m), `data-act="tpl-add-edit" data-id="${id}" data-key="${tp.key}"`, `data-act="tpl-add" data-id="${id}" data-key="${tp.key}"`, false)).join('')}
     </div>
-    <button class="dashed" data-act="go" data-to="#/custom/${id}">${icon('plus', 18)}Add custom</button>
+    <button class="dashed" data-act="custom-from" data-id="${id}" data-back="#/m/${id}/add-maint">${icon('plus', 18)}Add custom</button>
     <div class="actions-bottom"><button class="btn primary" data-act="go" data-to="#/m/${id}">Done</button></div>
   </div>`;
 }
 function vCustom(mid, itemId) {
   const m = M(mid), it = itemId ? I(itemId) : null;
   const unit = m.unit;
-  const ev = it ? it.every : { u: null, months: null };
-  return `<div class="screen">${topBar(it ? 'Edit maintenance' : 'Custom maintenance', it ? '#/i/' + it.id : '#/m/' + mid + '/add-maint')}
-    <h2 class="headline">${it ? esc(it.title) : 'What needs doing?'}</h2>
-    ${field('Name', inp('c_title', it?.title, 'e.g. Replace hydraulic filter'))}
-    ${hasMeter(m) ? `<div class="two">${field('Repeat every', inp('c_u', ev.u, unit === 'hrs' ? 'e.g. 50' : 'e.g. 5000', 'number', 'inputmode="decimal"'))}${field('Unit', `<input class="inp" value="${unit === 'hrs' ? 'hours' : unit === 'km' ? 'km' : 'miles'}" disabled>`)}</div>` : ''}
-    ${field(hasMeter(m) ? 'Or every (months)' : 'Repeat every (months)', inp('c_months', ev.months, 'e.g. 12', 'number', 'inputmode="numeric"'))}
-    <div class="two">${field('Last done', inp('c_lastDate', it?.lastDate || todayISO(), '', 'date'))}${hasMeter(m) ? field(`At (${UNIT_LABEL[unit]})`, inp('c_lastReading', it?.lastReading ?? m.reading, '', 'number', 'inputmode="decimal"')) : ''}</div>
+  const ev = it ? it.every : { u: null, months: null, days: null };
+  return `<div class="screen">${topBar(it ? 'Edit maintenance' : 'Custom maintenance', it ? '#/i/' + it.id : customReturn || '#/m/' + mid + '/add-maint')}
+    ${field('What needs doing?', inp('c_title', it?.title, 'e.g. Replace hydraulic filter'))}
+    ${intervalFields(m, ev)}
+    <div class="${hasMeter(m) ? 'two' : ''}">${field('Last done', inp('c_lastDate', it?.lastDate || todayISO(), '', 'date'))}${hasMeter(m) ? field(`At (${UNIT_LABEL[unit]})`, inp('c_lastReading', it?.lastReading ?? m.reading, '', 'text', 'inputmode="numeric" data-commas')) : ''}</div>
     ${it && it.severe ? `<p class="note">Severe-duty interval: ${esc([it.severe.u ? fmtN(it.severe.u, UNIT_LABEL[unit]) : '', it.severe.months ? plural(it.severe.months, 'month') : ''].filter(Boolean).join(' or '))} (used when Severe duty is on for this machine).</p>` : ''}
     ${field('Parts / notes', `<textarea class="inp" id="c_notes" style="height:90px" placeholder="Part numbers, torque specs, where to buy">${esc(it?.notes || '')}</textarea>`)}
     <div class="spacer"></div>
     <div class="actions-bottom"><button class="btn primary" data-act="custom-save" data-mid="${mid}" data-id="${it ? it.id : ''}">${it ? 'Save changes' : 'Save maintenance'}</button>
-    ${it && it.key && templatesFor(m).some((tp) => tp.key === it.key) ? `<button class="btn text" data-act="reset-item" data-id="${it.id}">Reset to suggested interval</button>` : `<button class="btn text" data-act="back" data-to="#/m/${mid}">Cancel</button>`}</div>
+    ${it && it.key && templatesFor(m).some((tp) => tp.key === it.key) ? `<button class="btn text" data-act="reset-item" data-id="${it.id}">Reset to suggested interval</button>` : ''}</div>
   </div>`;
 }
 
@@ -809,11 +850,10 @@ function vReceipt(mid, rid) {
 function vWarranty(mid, wid) {
   const m = M(mid), w = wid ? S.warranties.find((x) => x.id === wid) : null;
   return `<div class="screen">${topBar(w ? 'Warranty' : 'Add warranty', '#/m/' + mid + '/warranty')}
-    <h2 class="headline">Warranty details</h2>
     ${field('Provider', inp('w_provider', w?.provider, `e.g. ${m.make || 'Cub Cadet'}`))}
     ${field('Coverage', inp('w_coverage', w?.coverage, 'e.g. Parts & labor, powertrain'))}
     <div class="two">${field('Starts', inp('w_start', w?.start || todayISO(), '', 'date'))}${field('Ends', inp('w_end', w?.end, '', 'date'))}</div>
-    ${hasMeter(m) ? field(`Or until (${UNIT_LABEL[m.unit]}, optional)`, inp('w_limit', w?.limit, m.unit === 'hrs' ? 'e.g. 300' : 'e.g. 60000', 'number', 'inputmode="decimal"')) : ''}
+    ${hasMeter(m) ? field(`Or until (${UNIT_LABEL[m.unit]}, optional)`, inp('w_limit', w?.limit, m.unit === 'hrs' ? 'e.g. 300' : 'e.g. 60,000', 'text', 'inputmode="numeric" data-commas')) : ''}
     ${field('Policy # (optional)', inp('w_policy', w?.policy, 'Policy or claim #'))}
     ${field('Phone / notes (optional)', inp('w_notes', w?.notes, 'Claim phone number, dealer'))}
     <div class="spacer"></div>
@@ -825,7 +865,6 @@ function vNote(mid, nid) {
   const m = M(mid), n = nid ? S.notes.find((x) => x.id === nid) : null;
   const items = S.items.filter((i) => i.machineId === mid);
   return `<div class="screen">${topBar(n ? 'Note' : 'Add note', '#/m/' + mid + '/notes')}
-    <h2 class="headline">What do you want to remember?</h2>
     ${field('Machine', `<select class="inp" id="n_mid">${S.machines.filter((x) => !x.archived).map((x) => `<option value="${x.id}" ${x.id === mid ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select>`)}
     ${field('Note', `<textarea class="inp" id="n_body" placeholder="Write what you noticed, fixed or want to remember…">${esc(n?.body || '')}</textarea>`)}
     ${field('Link to maintenance (optional)', `<select class="inp" id="n_item"><option value="">None</option>${items.map((i) => `<option value="${i.id}" ${n?.itemId === i.id ? 'selected' : ''}>${esc(i.title)}</option>`).join('')}</select>`)}
@@ -838,7 +877,7 @@ function vFuel(mid) {
   const m = M(mid);
   const vol = m.unit === 'km' ? 'liters' : 'gallons';
   return `<div class="screen">${topBar('Fuel-up', '#/m/' + mid + '/history')}
-    <div class="two">${field('Date', inp('f_date', todayISO(), '', 'date'))}${field(`Odometer (${UNIT_LABEL[m.unit] || 'mi'})`, inp('f_reading', Math.round(predictedReading(m) || m.reading || 0), '', 'number', 'inputmode="decimal"'))}</div>
+    <div class="two">${field('Date', inp('f_date', todayISO(), '', 'date'))}${field(`Odometer (${UNIT_LABEL[m.unit] || 'mi'})`, inp('f_reading', Math.round(predictedReading(m) || m.reading || 0), '', 'text', 'inputmode="numeric" data-commas'))}</div>
     <div class="two">${field(vol[0].toUpperCase() + vol.slice(1), inp('f_gal', '', 'e.g. 18.4', 'text', 'inputmode="decimal"'))}${field('Total cost', inp('f_total', '', '$0.00', 'text', 'inputmode="decimal"'))}</div>
     <button class="trow" data-act="toggle-full"><div class="grow"><div class="t">Filled the tank</div><div class="d">Needed to calculate ${m.unit === 'km' ? 'km/L' : 'MPG'}</div></div><span class="switch on" id="f_full"></span></button>
     <div class="spacer"></div>
@@ -848,10 +887,19 @@ function vFuel(mid) {
 function vChecklist(mid, key) {
   const m = M(mid), c = CHECKLISTS[key] || CHECKLISTS.spring;
   return `<div class="screen">${topBar(c.title, '#/m/' + mid)}
-    <p class="note">Check off what you did. It saves to ${esc(m.name)}'s history as one entry.</p>
     <div class="list">${c.items.map((x, i) => `<button class="trow" data-act="cl-toggle" data-i="${i}"><span class="check" id="cl_${i}"></span><div class="grow"><div class="t" style="font-weight:400;font-size:15px">${esc(x)}</div></div></button>`).join('')}</div>
     <div class="spacer"></div>
     <div class="actions-bottom"><button class="btn primary" data-act="cl-save" data-mid="${mid}" data-key="${key}">Save to history</button></div>
+  </div>`;
+}
+
+function vPrecheck(mid) {
+  const m = M(mid), c = PRECHECKS[m.cat] || PRECHECKS.other;
+  return `<div class="screen">${topBar(c.title, '#/m/' + mid)}
+    <div class="list">${c.items.map((x, i) => `<button class="trow" data-act="cl-toggle" data-i="${i}"><span class="check" id="cl_${i}">${icon('check', 16)}</span><div class="grow"><div class="t" style="font-weight:500;font-size:16px">${esc(x)}</div></div></button>`).join('')}</div>
+    <button class="btn text" data-act="go" data-to="#/note/${mid}">${icon('note', 16)}Something off? Add a note</button>
+    <div class="spacer"></div>
+    <div class="actions-bottom"><button class="btn primary" data-act="pre-done" data-mid="${mid}">Done</button></div>
   </div>`;
 }
 
@@ -874,6 +922,23 @@ function vSchedule() {
 }
 
 /* ======================= profile ======================= */
+const THEMES = [
+  ['shop', 'Shop', '#000', 'none', 'auto', '#383838', '#12ff54'],
+  ['pegboard', 'Pegboard', '#17120d', 'radial-gradient(circle at 50% 50%, rgba(0,0,0,.55) 0 2.2px, transparent 2.8px)', '22px 22px', '#2e261d', '#ff8f2a'],
+  ['diamond', 'Diamond plate', '#111417', 'linear-gradient(45deg, transparent 44%, rgba(255,255,255,.07) 45% 55%, transparent 56%), linear-gradient(-45deg, transparent 44%, rgba(255,255,255,.05) 45% 55%, transparent 56%)', '18px 9px', '#2b3137', '#5cc8ff'],
+  ['barn', 'Pole barn', '#0e130f', 'repeating-linear-gradient(90deg, rgba(0,0,0,.35) 0 2px, transparent 2px 46px), repeating-linear-gradient(90deg, rgba(255,255,255,.03) 0 1px, transparent 1px 7px)', 'auto', '#26302a', '#ffc61a'],
+];
+function themePicker(mini) {
+  const cur = S.settings.theme || 'shop';
+  return `<div class="themes ${mini ? 'mini' : ''}">${THEMES.map(([k, l, bg, pat, size, card, acc]) => `<button class="theme ${cur === k ? 'on' : ''}" data-act="set-theme" data-v="${k}"><div class="sw" style="background-color:${bg};background-image:${pat};background-size:${size}"><i style="background:${card}"></i><b style="background:${acc}"></b></div><span>${l}</span></button>`).join('')}</div>`;
+}
+function applyTheme() {
+  const t = S.settings.theme || 'shop';
+  if (document.documentElement.dataset.theme !== t) {
+    document.documentElement.dataset.theme = t;
+    const meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.content = (THEMES.find((x) => x[0] === t) || THEMES[0])[2];
+  }
+}
 function vProfile() {
   const yr = String(new Date().getFullYear());
   const ms = S.machines.filter((m) => !m.archived);
@@ -882,29 +947,35 @@ function vProfile() {
   const total = spendBy.reduce((s, x) => s + x.v, 0);
   const archived = S.machines.filter((m) => m.archived).length;
   const nperm = ('Notification' in window) ? Notification.permission : 'unsupported';
+  const row = (act, ic, t, d, extra = '') => `<button class="lrow" ${act}><div class="ibox">${icon(ic, 18)}</div><div class="grow"><div class="t">${t}</div>${d ? `<div class="d">${d}</div>` : ''}</div>${extra}</button>`;
+  const bk = backupStatus();
   return `<div class="screen has-nav">
-    <div class="hdr sticky"><div class="h-title">Profile</div></div>
-    <div class="card"><div class="row between"><div><div class="muted" style="font-size:12px">Spent in ${yr}</div><div class="bebas" style="font-size:38px">${money(total) || '$0'}</div></div><div class="muted" style="text-align:right;font-size:13px">${plural(ms.length, 'machine')}<br>${plural(S.logs.filter((l) => !l.skipped).length, 'service')} logged</div></div>
-      ${spendBy.length ? `<div class="stack" style="margin-top:10px">${spendBy.map((x) => `<div><div class="row between" style="font-size:13px"><span>${esc(x.m.name)}</span><span class="muted">${money(x.v)}</span></div><div class="bar" style="margin-top:4px;background:#222"><i style="width:${Math.round(x.v / max * 100)}%;background:#fff"></i></div></div>`).join('')}</div>` : ''}</div>
-    <div class="sec-title">Settings</div>
+    <div class="hdr sticky"><div class="h-title">Settings</div></div>
+    ${total ? `<div class="card"><div class="row between"><div><div class="muted" style="font-size:12px">Spent in ${yr}</div><div class="bebas" style="font-size:38px">${money(total)}</div></div><div class="muted" style="text-align:right;font-size:13px">${plural(S.logs.filter((l) => !l.skipped).length, 'service')} logged</div></div>
+      <div class="stack" style="margin-top:10px">${spendBy.map((x) => `<div><div class="row between" style="font-size:13px"><span>${esc(x.m.name)}</span><span class="muted">${money(x.v)}</span></div><div class="bar" style="margin-top:4px;background:#222"><i style="width:${Math.round(x.v / max * 100)}%;background:#fff"></i></div></div>`).join('')}</div></div>` : ''}
+    <div class="sec-title">Garage</div>
     <div class="group">
-      <button class="lrow" data-act="rename-garage"><div class="ibox">${icon('garage', 18)}</div><div class="grow"><div class="t">Garage name</div><div class="d">${esc(S.settings.garage)}</div></div></button>
-      <button class="lrow" data-act="toggle-units"><div class="ibox">${icon('gauge', 18)}</div><div class="grow"><div class="t">Distance for new vehicles</div><div class="d">${S.settings.distUnit === 'km' ? 'Kilometers' : 'Miles'}</div></div><span class="pill-tag">Change</span></button>
-      <button class="lrow" data-act="lead-days"><div class="ibox">${icon('clock', 18)}</div><div class="grow"><div class="t">"Due soon" warning</div><div class="d">${S.settings.leadDays} days ahead</div></div></button>
-      <button class="lrow" data-act="notify-on"><div class="ibox">${icon('bell', 18)}</div><div class="grow"><div class="t">Reminders</div><div class="d">${nperm === 'granted' ? 'On · shows when you open the app' : nperm === 'denied' ? 'Blocked in browser settings' : nperm === 'unsupported' ? 'Add to Home Screen to enable' : 'Off · tap to turn on'}</div></div></button>
-      <button class="lrow" data-act="ics-all"><div class="ibox">${icon('calendar', 18)}</div><div class="grow"><div class="t">Add schedule to calendar</div><div class="d">Downloads a calendar file with every due date</div></div></button>
-      <button class="lrow" data-act="go" data-to="#/install"><div class="ibox">${icon('squareplus', 18)}</div><div class="grow"><div class="t">Add to Home Screen</div><div class="d">${isStandalone() ? 'Done. You’re using the app version' : 'Step-by-step for iPhone and Android'}</div></div></button>
+      ${row('data-act="rename-garage"', 'garage', 'Name', esc(S.settings.garage))}
+      ${row('data-act="theme-sheet"', 'palette', 'Theme', esc((THEMES.find((x) => x[0] === (S.settings.theme || 'shop')) || THEMES[0])[1]))}
+      ${row('data-act="toggle-units"', 'gauge', 'Distance for new vehicles', S.settings.distUnit === 'km' ? 'Kilometers' : 'Miles')}
+      ${archived ? row('data-act="go" data-to="#/archived"', 'storage', 'Archived', plural(archived, 'machine')) : ''}
+    </div>
+    <div class="sec-title">Reminders</div>
+    <div class="group">
+      ${row('data-act="notify-on"', 'bell', 'Notifications', nperm === 'granted' ? 'On' : nperm === 'denied' ? 'Blocked in browser settings' : nperm === 'unsupported' ? 'Add to Home Screen first' : 'Off')}
+      ${row('data-act="lead-days"', 'clock', 'Warn me', `${S.settings.leadDays} days before`)}
+      ${row('data-act="backup-snooze"', 'save', 'Backup reminder', esc((BACKUP_OPTS.find((o) => o[0] === S.settings.backupEvery) || [0, 'Off'])[1]) + (bk && S.settings.backupEvery ? ' · next ' + fmtDate(bk.due) : ''))}
+      ${row('data-act="ics-all"', 'calendar', 'Add to calendar', '')}
     </div>
     <div class="sec-title">Your data</div>
     <div class="group">
-      <button class="lrow" data-act="backup"><div class="ibox">${icon('save', 18)}</div><div class="grow"><div class="t">Back up everything</div><div class="d">${S.settings.lastBackup ? 'Last backup ' + fmtDate(S.settings.lastBackup, true) : 'Never backed up · saves a file with photos included'}</div></div></button>
-      <button class="lrow" data-act="backup-snooze"><div class="ibox">${icon('bell', 18)}</div><div class="grow"><div class="t">Backup reminder</div><div class="d">${esc((BACKUP_OPTS.find((o) => o[0] === S.settings.backupEvery) || [0, 'Off'])[1])}${backupStatus() && S.settings.backupEvery ? ' · next ' + fmtDate(backupStatus().due) : ''}</div></div><span class="pill-tag">Change</span></button>
-      <label class="lrow" style="cursor:pointer"><div class="ibox">${icon('upload', 18)}</div><div class="grow"><div class="t">Restore from backup</div><div class="d">Replaces what's on this phone</div></div><input type="file" accept=".json,application/json" hidden data-change="restore"></label>
-      <button class="lrow" data-act="go" data-to="#/import"><div class="ibox">${icon('fileup', 18)}</div><div class="grow"><div class="t">Import from another app</div><div class="d">VMT, Fuelly, Drivvo, a spreadsheet… any CSV</div></div></button>
-      <button class="lrow" data-act="csv"><div class="ibox">${icon('sheet', 18)}</div><div class="grow"><div class="t">Export history (CSV)</div><div class="d">Open in Excel or Google Sheets</div></div></button>
-      ${archived ? `<button class="lrow" data-act="go" data-to="#/archived"><div class="ibox">${icon('storage', 18)}</div><div class="grow"><div class="t">Archived machines</div><div class="d">${plural(archived, 'machine')}</div></div></button>` : ''}
+      ${row('data-act="backup"', 'download', 'Back up', S.settings.lastBackup ? 'Last ' + fmtDate(S.settings.lastBackup, true) : 'Never')}
+      <label class="lrow" style="cursor:pointer"><div class="ibox">${icon('upload', 18)}</div><div class="grow"><div class="t">Restore</div><div class="d">Replaces what’s on this phone</div></div><input type="file" accept=".json,application/json" hidden data-change="restore"></label>
+      ${row('data-act="go" data-to="#/import"', 'fileup', 'Import from another app', 'VMT, Fuelly, Drivvo, any CSV')}
+      ${row('data-act="csv"', 'sheet', 'Export history', 'CSV for Excel or Sheets')}
     </div>
-    <p class="note" style="margin-top:8px">Data stays on this device in this browser. Back up now and then, especially before switching phones. Maintenance intervals are general starting points, so check your owner's manuals.</p>
+    <div class="sec-title">Help</div>
+    <div class="group">${row('data-act="go" data-to="#/install"', 'squareplus', 'Add to Home Screen', isStandalone() ? 'Done' : '')}</div>
     <button class="btn text" data-act="reset-all" style="color:#ff6b6b">Erase all data</button>
     <a class="credit" href="https://masen.site" target="_blank" rel="noopener">Built in a garage by a design student who should’ve been studying · <b>masen.site</b></a>
   </div>${nav('profile')}`;
@@ -987,11 +1058,11 @@ function vImport() {
   const ms = S.machines.filter((m) => !m.archived);
   if (!imp) return `<div class="screen">${topBar('Import', '#/profile')}
     <h2 class="headline">Bring your history over</h2>
-    <p class="note">Works with a CSV export from VMT (Vehicle Maintenance Tracker), Fuelly, Drivvo, Simply Auto, or your own spreadsheet. We figure out which column is which, and you can fix anything before it saves.</p>
+    <p class="note">Any CSV export works: VMT, Fuelly, Drivvo, Simply Auto or a spreadsheet. You can fix the column matches before saving.</p>
     <div class="istep"><div class="n">1</div><div class="grow"><div class="t">Export from the old app</div><div class="d">Look for Export, Share or Backup and pick CSV. Save it to Files (or email it to yourself and save the attachment).</div></div></div>
     <div class="istep"><div class="n">2</div><div class="grow"><div class="t">Pick the file here</div><div class="d">Nothing is uploaded anywhere. It’s read right on this phone.</div></div></div>
     <label class="btn primary" style="cursor:pointer">${icon('fileup', 18)}Choose CSV file<input type="file" accept=".csv,text/csv,text/plain,.txt,.tsv" hidden data-change="import-file"></label>
-    <p class="note">Got a different format (Excel, PDF)? Open it in Google Sheets or Numbers and export as CSV first.</p>
+    <p class="note">Excel file? Open it in Google Sheets or Numbers and export as CSV.</p>
   </div>`;
   const recs = impRecords();
   const opt = (k) => `<select class="inp" data-change="imp-map" data-k="${k}"><option value="">— none —</option>${imp.header.map((h, i) => `<option value="${i}" ${imp.map[k] === i ? 'selected' : ''}>${esc(h)}</option>`).join('')}</select>`;
@@ -1015,6 +1086,8 @@ function vImport() {
   </div>`;
 }
 function guessCat(v) {
+  if (/sprinter|transit|promaster|camper ?van|winnebago (revel|solis|travato)|storyteller|roadtrek/i.test(v)) return 'camper';
+  if (/motorhome|class [abc]\b|\brv\b|thor|jayco|coachmen|fleetwood|newmar|tiffin/i.test(v)) return 'rv';
   return /zero|\bztr?\d*|z\d{3}/i.test(v) ? 'zeroturn' : /tractor|kubota|deere \d|mahindra|kioti/i.test(v) ? 'tractor' : /mower|cub cadet|toro|husqvarna|craftsman|ariens|scag|exmark|bad boy/i.test(v) ? 'riding'
     : /e-?bike|rad ?power|aventon|lectric|trek|specialized/i.test(v) ? 'ebike' : /sur-?ron|talaria|e-?ride|stark varg/i.test(v) ? 'edirt' : /generator|honda eu|champion|predator/i.test(v) ? 'generator'
     : /harley|motorcycle|yamaha r|kawasaki|ducati|ktm|suzuki gsx/i.test(v) ? 'motorcycle' : /polaris|can-?am|razor|rzr|atv|utv|gator/i.test(v) ? 'atv' : /trailer/i.test(v) ? 'trailer' : /boat|mercury|evinrude|pontoon/i.test(v) ? 'boat'
@@ -1049,7 +1122,7 @@ function runImport() {
     const ym = String(name).match(/^((?:19|20)\d\d)\s+(\S+)\s*(.*)$/);
     const m = { id: uid(), name: name || c.label, cat, make: ym ? ym[2] : '', model: ym ? ym[3] : '', year: ym ? ym[1] : '', unit, reading: 0, readingDate: '', photoId: null, severe: false, archived: false, specs: {}, created: todayISO() };
     S.machines.push(m);
-    if (imp.suggest) templatesFor(m).forEach((tp) => { const it = itemFromTemplate(m, tp); it.unknown = true; it.lastDate = addMonths(todayISO(), -(it.every.months || 120)); it.lastReading = -1e9; it.first = null; S.items.push(it); });
+    if (imp.suggest) templatesFor(m).forEach((tp) => { const it = itemFromTemplate(m, tp); it.unknown = true; it.lastDate = backDate(it.every); it.lastReading = -1e9; it.first = null; S.items.push(it); });
     return m;
   };
   const groups = {};
@@ -1126,6 +1199,7 @@ function sheet(html, onOpen) {
   s.addEventListener('click', (e) => { if (e.target === s) closeSheet(); });
   document.body.appendChild(s);
   hydratePhotos(s);
+  fmtCommaInputs(s);
   if (onOpen) onOpen(s);
 }
 function closeSheet() { const s = $('#scrim'); if (s) s.remove(); }
@@ -1140,7 +1214,7 @@ function openLog(itemId, logId) {
   const rd = editing ? editing.reading : pred != null ? (m.unit === 'hrs' ? Math.round(pred * 10) / 10 : Math.round(pred)) : null;
   sheet(`${sheetHead(editing ? 'Edit service' : 'Log ' + (it ? shortTitle(it.title).toLowerCase() : 'service'))}
     ${editing ? field('What was done', inp('l_title', editing.title, '')) : `<div class="row" style="gap:10px"><span class="chip">${icon(it.icon, 15)}${esc(it.title)}</span><span class="muted">${esc(m.name)}</span></div>`}
-    <div class="two">${field('Date', inp('l_date', editing ? editing.date : todayISO(), '', 'date'))}${hasMeter(m) ? field(m.unit === 'hrs' ? 'Hours' : 'Odometer', inp('l_reading', rd, '', 'number', 'inputmode="decimal"')) : '<div></div>'}</div>
+    <div class="two">${field('Date', inp('l_date', editing ? editing.date : todayISO(), '', 'date'))}${hasMeter(m) ? field(m.unit === 'hrs' ? 'Hours' : 'Odometer', inp('l_reading', rd, '', 'text', 'inputmode="numeric" data-commas')) : '<div></div>'}</div>
     ${!editing && others.length ? `<div class="stack tight"><span class="muted" style="font-size:12px">Did anything else at the same time?</span>${others.slice(0, 5).map((x) => `<button class="trow" style="min-height:48px" data-act="log-also" data-id="${x.it.id}"><span class="check" data-also="${x.it.id}"></span><div class="grow"><div class="t" style="font-size:15px">${esc(x.it.title)}</div><div class="d">${esc(x.st.text)}</div></div></button>`).join('')}</div>` : ''}
     <div class="two">${field('Cost (optional)', inp('l_cost', editing?.cost, '$0.00', 'text', 'inputmode="decimal"'))}${field('Done by', `<select class="inp" id="l_shop"><option value="">Me (DIY)</option>${[...new Set(S.logs.map((l) => l.shop).filter(Boolean))].map((s) => `<option ${editing?.shop === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}<option value="__new">A shop…</option></select>`)}</div>
     ${field('Notes (optional)', inp('l_notes', editing?.notes, 'e.g. Used Mobil 1 5W-30, filter FL-820S'))}
@@ -1207,6 +1281,7 @@ function openFab(mid) {
   const items = [['Maintenance', 'wrench', `#/m/${mid}/add-maint`], ['Log a service', 'check', 'log-any'], ['Receipt', 'receipt', `#/receipt/${mid}`], ['Warranty', 'shield', `#/warranty/${mid}`], ['Note', 'note', `#/note/${mid}`]];
   if (hasMeter(m)) items.splice(2, 0, [m.unit === 'hrs' ? 'Update hours' : 'Update odometer', 'gauge', 'reading']);
   if (isVehicle(m)) items.splice(3, 0, ['Fuel-up', 'fuel', `#/fuel/${mid}`]);
+  if (PRECHECKS[m.cat] && !NO_METER.includes(m.cat)) items.push([PRECHECKS[m.cat].title, 'checks', `#/precheck/${mid}`]);
   const f = document.createElement('div');
   f.className = 'fabmenu'; f.id = 'fab';
   f.innerHTML = items.map(([l, ic, to], i) => `<button class="it" style="animation-delay:${i * 35}ms" data-act="fab-go" data-to="${to}" data-id="${mid}"><span>${l}</span><span class="rbtn">${icon(ic, 20)}</span></button>`).join('') + `<button class="close" data-act="fab-close" aria-label="Close">${icon('x', 20)}</button>`;
@@ -1223,7 +1298,7 @@ function openOneOff(mid) {
   const m = M(mid);
   sheet(`${sheetHead('Log a repair')}
     ${field('What was done', inp('o_title', '', 'e.g. Replaced starter'))}
-    <div class="two">${field('Date', inp('o_date', todayISO(), '', 'date'))}${hasMeter(m) ? field(m.unit === 'hrs' ? 'Hours' : 'Odometer', inp('o_reading', Math.round((predictedReading(m) || 0) * 10) / 10, '', 'number')) : '<div></div>'}</div>
+    <div class="two">${field('Date', inp('o_date', todayISO(), '', 'date'))}${hasMeter(m) ? field(m.unit === 'hrs' ? 'Hours' : 'Odometer', inp('o_reading', Math.round((predictedReading(m) || 0) * 10) / 10, '', 'text', 'inputmode="numeric" data-commas')) : '<div></div>'}</div>
     <div class="two">${field('Cost', inp('o_cost', '', '$0.00', 'text', 'inputmode="decimal"'))}${field('Shop (optional)', inp('o_shop', '', 'DIY'))}</div>
     ${field('Notes', inp('o_notes', '', ''))}
     <div class="sheet-actions"><button class="btn primary" data-act="oneoff-save" data-id="${mid}">Save</button></div>`);
@@ -1248,40 +1323,63 @@ function estReadingOn(m, date) {
   return Math.max(0, m.unit === 'hrs' ? Math.round(v * 10) / 10 : Math.round(v / 10) * 10);
 }
 let schedUnknown = false;
+/* shared "repeat every" fields: distance/hours + a time (days, weeks or months) */
+function intervalFields(m, ev) {
+  const u = UNIT_LABEL[m.unit], meter = hasMeter(m);
+  const presetsU = m.unit === 'hrs' ? [10, 25, 50, 100, 200] : m.unit === 'km' ? [5000, 8000, 10000, 15000] : [3000, 5000, 7500, 10000];
+  const tUnit = ev.days ? (ev.days % 7 === 0 ? 'weeks' : 'days') : 'months';
+  const tVal = ev.days ? (tUnit === 'weeks' ? ev.days / 7 : ev.days) : ev.months ?? '';
+  const short = ev.days || (!meter && !ev.months);
+  const tp = short && ev.days ? [[3, 'days', '3 days'], [1, 'weeks', '1 wk'], [2, 'weeks', '2 wk'], [1, 'months', '1 mo'], [3, 'months', '3 mo']] : [[1, 'months', '1 mo'], [3, 'months', '3 mo'], [6, 'months', '6 mo'], [12, 'months', '1 yr'], [24, 'months', '2 yr']];
+  return `<div class="field"><span>Repeat every</span>
+    ${meter ? `<div class="row" style="gap:8px">${inp('s_u', ev.u ?? '', 'off', 'text', 'inputmode="numeric" data-commas')}<span class="muted" style="min-width:28px">${u}</span></div>
+      <div class="picks">${presetsU.map((v) => `<button class="pick" data-act="s-pick" data-v="${v}">${fmtN(v, u)}</button>`).join('')}</div>
+      <span class="faint" style="font-size:12px;margin-top:4px">or</span>` : ''}
+    <div class="row" style="gap:8px">${inp('s_t', tVal, 'off', 'number', 'inputmode="numeric"')}<select class="inp" id="s_tu" style="width:132px">${['days', 'weeks', 'months'].map((x) => `<option ${x === tUnit ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+    <div class="picks">${tp.map(([n, un, l]) => `<button class="pick" data-act="s-tpick" data-n="${n}" data-u="${un}">${l}</button>`).join('')}</div>
+    ${meter ? `<span class="faint" style="font-size:12px">Whichever comes first. Leave one empty to ignore it.</span>` : ''}
+  </div>`;
+}
+function readInterval(m) {
+  const u = hasMeter(m) ? num(val('s_u')) : null, t = num(val('s_t')), tu = val('s_tu');
+  return { u: u || null, months: t && tu === 'months' ? t : null, days: t && tu !== 'months' ? (tu === 'weeks' ? t * 7 : t) : null };
+}
 function openSched(id) {
   const it = I(id), m = M(it.machineId), u = UNIT_LABEL[m.unit], meter = hasMeter(m);
   schedUnknown = !!it.unknown && !lastLogFor(it.id);
-  const presetsU = m.unit === 'hrs' ? [10, 25, 50, 100, 200] : m.unit === 'km' ? [5000, 8000, 10000, 15000] : [3000, 5000, 7500, 10000];
-  const mo = (v) => (v === 12 ? '1 yr' : v === 24 ? '2 yr' : v + ' mo');
-  sheet(`${sheetHead('Schedule')}
-    <p class="note" style="margin:-8px 0 0">${esc(it.title)} · ${esc(m.name)}</p>
-    <div class="field"><span>Repeat every</span>
-      ${meter ? `<div class="two"><div class="row" style="gap:8px">${inp('s_u', it.every.u ?? '', 'none', 'number', 'inputmode="decimal"')}<span class="muted">${u}</span></div><div class="row" style="gap:8px">${inp('s_m', it.every.months ?? '', 'none', 'number', 'inputmode="numeric"')}<span class="muted">mo</span></div></div>
-        <div class="picks">${presetsU.map((v) => `<button class="pick" data-act="s-pick" data-f="s_u" data-v="${v}">${fmtN(v, u)}</button>`).join('')}</div>` : `<div class="row" style="gap:8px">${inp('s_m', it.every.months ?? '', 'e.g. 12', 'number', 'inputmode="numeric"')}<span class="muted">months</span></div>`}
-      <div class="picks">${[1, 3, 6, 12, 24].map((v) => `<button class="pick" data-act="s-pick" data-f="s_m" data-v="${v}">${mo(v)}</button>`).join('')}</div>
-      ${meter ? `<span class="faint" style="font-size:12px">Whichever comes first. Clear one to ignore it.</span>` : ''}
-    </div>
+  sheet(`${sheetHead(it.title)}
+    ${intervalFields(m, it.every)}
     <div class="field"><span>Last done</span>
-      <div class="${meter ? 'two' : ''}">${inp('s_date', schedUnknown ? '' : it.lastDate, '', 'date')}${meter ? inp('s_r', schedUnknown ? '' : (it.lastReading ?? ''), 'at ' + (u || ''), 'number', 'inputmode="decimal"') : ''}</div>
+      <div class="${meter ? 'two' : ''}">${inp('s_date', schedUnknown ? '' : it.lastDate, '', 'date')}${meter ? inp('s_r', schedUnknown ? '' : (it.lastReading ?? ''), 'at ' + (u || ''), 'text', 'inputmode="numeric" data-commas') : ''}</div>
       <div class="picks">${[['Today', 0], ['1 mo ago', 1], ['3 mo ago', 3], ['6 mo ago', 6], ['1 yr ago', 12]].map(([l, n]) => `<button class="pick" data-act="s-ago" data-v="${n}">${l}</button>`).join('')}<button class="pick ${schedUnknown ? 'on' : ''}" data-act="s-unknown" id="s_unk">Not sure</button></div>
-      ${meter ? `<span class="faint" style="font-size:12px">Quick picks estimate the ${m.unit === 'hrs' ? 'hours' : 'mileage'} from how much you use it. Type the real number if you know it.</span>` : ''}
     </div>
     <div class="preview" id="s_prev"></div>
     <div class="sheet-actions"><button class="btn primary" data-act="sched-save" data-id="${id}">Save</button></div>`, (sh) => {
     sh.addEventListener('input', (e) => { if (e.target.id === 's_date' || e.target.id === 's_r') { schedUnknown = false; const k = $('#s_unk'); if (k) k.classList.remove('on'); } schedPreview(id); });
+    sh.addEventListener('change', () => schedPreview(id));
     schedPreview(id);
   });
 }
 function schedDraft(id) {
   const it = I(id), m = M(it.machineId);
-  const uV = num(val('s_u')), mV = num(val('s_m'));
   const d = val('s_date') || todayISO();
-  return { ...it, every: { u: hasMeter(m) ? uV || null : null, months: mV || null }, lastDate: d, lastReading: hasMeter(m) ? (num(val('s_r')) ?? estReadingOn(m, d)) : it.lastReading, unknown: false, snoozeUntil: null, first: lastLogFor(it.id) ? null : it.first };
+  return { ...it, every: readInterval(m), lastDate: d, lastReading: hasMeter(m) ? (num(val('s_r')) ?? estReadingOn(m, d)) : it.lastReading, unknown: false, snoozeUntil: null, first: lastLogFor(it.id) ? null : it.first };
 }
+/* edit a suggested item's interval before it's added */
+function openTplSheet(mid, key) {
+  const m = M(mid), tp = templatesFor(m).find((x) => x.key === key);
+  const base = itemFromTemplate(m, tp);
+  const ev = (suggestSel.over && suggestSel.over[key]) || base.every;
+  sheet(`${sheetHead(tp.title)}
+    ${intervalFields(m, ev)}
+    <div class="sheet-actions"><button class="btn primary" data-act="tpl-save" data-mid="${mid}" data-key="${key}">Done</button>
+    <button class="btn text" data-act="tpl-reset" data-key="${key}">Use suggested (${esc(intervalText(base, m).replace(/^Every /, '').toLowerCase())})</button></div>`);
+}
+function refreshSchedPreview() { const b = $('[data-act=sched-save]'); if (b) schedPreview(b.dataset.id); }
 function schedPreview(id) {
   const box = $('#s_prev'); if (!box) return;
   const d = schedDraft(id);
-  if (!d.every.u && !d.every.months) { box.innerHTML = 'Set at least one: a distance/hours or a number of months.'; return; }
+  if (!d.every.u && !hasTime(d.every)) { box.innerHTML = 'Set at least one: a distance/hours or a number of months.'; return; }
   if (schedUnknown) { box.innerHTML = '<b>Shows as due now</b> until you log it.'; return; }
   const st = itemStatus(d);
   box.innerHTML = `Next due: <b>${st.dueDate ? fmtDate(st.dueDate, true) : '—'}</b> · ${esc(st.text)}`;
@@ -1326,6 +1424,43 @@ const snapshot = () => JSON.parse(JSON.stringify(S));
 function undoable(msg, fn) { const snap = snapshot(); fn(); save(); render(); toast(msg, () => { S = snap; save(); render(); }); }
 
 /* ======================= mutations ======================= */
+function doSnooze(id, d) { const it = I(id); if (!it) return; undoable(d ? `Snoozed ${d === 1 ? 'until tomorrow' : humanDays(d)}` : 'Un-snoozed', () => { it.snoozeUntil = d ? addDays(todayISO(), d) : null; }); }
+function doSkip(id) { const it = I(id); if (!it) return; const m = M(it.machineId); undoable('Skipped this time', () => { doLog([it.id], { machineId: m.id, title: it.title, date: todayISO(), reading: hasMeter(m) ? m.reading : null, skipped: true }); }); }
+
+/* swipe a task: left = snooze a week, right = skip this time */
+let swipeState = null, swallowClick = false;
+document.addEventListener('pointerdown', (e) => {
+  const row = e.target.closest('.swipe > .mrow');
+  if (!row || e.button > 0 || e.target.closest('button')) return;
+  swipeState = { row, wrap: row.parentElement, x0: e.clientX, y0: e.clientY, dx: 0, on: false, id: row.parentElement.dataset.id };
+});
+document.addEventListener('pointermove', (e) => {
+  const st = swipeState; if (!st) return;
+  const dx = e.clientX - st.x0, dy = e.clientY - st.y0;
+  if (!st.on) {
+    if (Math.abs(dy) > 12 && Math.abs(dy) > Math.abs(dx)) { swipeState = null; return; }
+    if (Math.abs(dx) < 12) return;
+    st.on = true; st.row.style.transition = 'none'; try { st.row.setPointerCapture(e.pointerId); } catch (err) {}
+  }
+  st.dx = dx;
+  const w = st.row.offsetWidth, lim = w * 0.32;
+  st.row.style.transform = `translateX(${dx}px)`;
+  st.wrap.dataset.dir = dx < 0 ? 'left' : 'right';
+  st.wrap.classList.toggle('armed', Math.abs(dx) > lim);
+});
+function endSwipe() {
+  const st = swipeState; swipeState = null; if (!st || !st.on) return;
+  swallowClick = true; setTimeout(() => (swallowClick = false), 60);
+  const w = st.row.offsetWidth, go2 = Math.abs(st.dx) > w * 0.32;
+  st.row.style.transition = 'transform .22s ease';
+  if (!go2) { st.row.style.transform = ''; st.wrap.classList.remove('armed'); return; }
+  st.row.style.transform = `translateX(${st.dx < 0 ? -w : w}px)`;
+  if (navigator.vibrate) try { navigator.vibrate(10); } catch (err) {}
+  setTimeout(() => (st.dx < 0 ? doSnooze(st.id, 7) : doSkip(st.id)), 200);
+}
+document.addEventListener('pointerup', endSwipe);
+document.addEventListener('pointercancel', () => { const st = swipeState; swipeState = null; if (st && st.on) { st.row.style.transition = 'transform .2s'; st.row.style.transform = ''; } });
+document.addEventListener('click', (e) => { if (swallowClick) { e.stopPropagation(); e.preventDefault(); swallowClick = false; } }, true);
 function setReading(m, value, date = todayISO()) {
   if (value == null || !hasMeter(m)) return;
   S.readings.push({ id: uid(), machineId: m.id, date, value });
@@ -1366,26 +1501,33 @@ const ACT = {
   'install-now': async () => { if (!installEvt) return; installEvt.prompt(); try { await installEvt.userChoice; } catch (e) {} installEvt = null; render(); },
   'install-dismiss': (el, e) => { e.stopPropagation(); S.settings.installDismissed = true; save(); render(); },
   sched: (el, e) => { e && e.stopPropagation(); closeSheet(); openSched(el.dataset.id); },
-  's-pick': (el) => { const i = $('#' + el.dataset.f); if (i) { i.value = el.dataset.v; schedPreview(el.closest('.sheet').querySelector('[data-act=sched-save]').dataset.id); } },
+  's-pick': (el) => { const i = $('#s_u'); if (i) { i.value = Number(el.dataset.v).toLocaleString(); refreshSchedPreview(); } },
+  's-tpick': (el) => { $('#s_t').value = el.dataset.n; $('#s_tu').value = el.dataset.u; refreshSchedPreview(); },
+  'tpl-save': (el) => { const m = M(el.dataset.mid); const ev = readInterval(m); if (!ev.u && !hasTime(ev)) return toast('Set how often it repeats'); suggestSel.over = suggestSel.over || {}; suggestSel.over[el.dataset.key] = ev; suggestSel.on[el.dataset.key] = true; closeSheet(); render(); },
+  'tpl-reset': (el) => { if (suggestSel.over) delete suggestSel.over[el.dataset.key]; closeSheet(); render(); },
+  'sug-edit': (el, e) => { e.stopPropagation(); openTplSheet(el.dataset.id, el.dataset.key); },
+  'tpl-add-edit': (el) => { const m = M(el.dataset.id); const tp = templatesFor(m).find((x) => x.key === el.dataset.key); const it = itemFromTemplate(m, tp); S.items.push(it); save(); render(); openSched(it.id); },
   's-ago': (el) => {
     const id = $('[data-act=sched-save]').dataset.id, it = I(id), m = M(it.machineId);
     const d = addMonths(todayISO(), -(+el.dataset.v)); $('#s_date').value = d;
-    if ($('#s_r')) $('#s_r').value = +el.dataset.v === 0 ? Math.round(predictedReading(m) * 10) / 10 : estReadingOn(m, d);
+    if ($('#s_r')) $('#s_r').value = withCommas(String(+el.dataset.v === 0 ? Math.round(predictedReading(m) * 10) / 10 : estReadingOn(m, d)));
     schedUnknown = false; $('#s_unk').classList.remove('on'); schedPreview(id);
   },
   's-unknown': (el) => { schedUnknown = !schedUnknown; el.classList.toggle('on', schedUnknown); if (schedUnknown) { $('#s_date').value = ''; if ($('#s_r')) $('#s_r').value = ''; } schedPreview($('[data-act=sched-save]').dataset.id); },
   'sched-save': (el) => {
     const it = I(el.dataset.id), m = M(it.machineId);
     const d = schedDraft(it.id);
-    if (!d.every.u && !d.every.months) return toast('Set how often it repeats');
+    if (!d.every.u && !hasTime(d.every)) return toast('Set how often it repeats');
     const snap = snapshot();
     it.every = d.every; it.snoozeUntil = null;
-    if (schedUnknown) { it.unknown = true; it.lastDate = addMonths(todayISO(), -(d.every.months || 120)); if (d.every.u) it.lastReading = (m.reading || 0) - d.every.u; }
+    if (schedUnknown) { it.unknown = true; it.lastDate = backDate(d.every); if (d.every.u) it.lastReading = (m.reading || 0) - d.every.u; }
     else { it.unknown = false; it.lastDate = d.lastDate; if (hasMeter(m)) it.lastReading = d.lastReading; }
     if (lastLogFor(it.id)) it.first = null;
     save(); closeSheet(); render(); toast('Schedule updated', () => { S = snap; save(); render(); });
   },
   'backup-snooze': () => openBackupSnooze(),
+  'theme-sheet': () => sheet(`${sheetHead('Theme')}${themePicker()}`),
+  'set-theme': (el) => { S.settings.theme = el.dataset.v; save(); applyTheme(); document.querySelectorAll('.theme').forEach((t) => t.classList.toggle('on', t.dataset.v === el.dataset.v)); if (!$('#scrim')) return; render(); },
   'imp-reset': () => { imp = null; render(); },
   'imp-suggest': (el) => { imp.suggest = !imp.suggest; el.querySelector('.switch').classList.toggle('on', imp.suggest); },
   'imp-run': () => runImport(),
@@ -1429,7 +1571,7 @@ const ACT = {
   },
   'add-next-2': () => {
     keepDraftFields();
-    if (draft.cat === 'cat') { if (!draft.name) draft.name = 'The Cat'; draft.unit = 'none'; draft.reading = ''; return go('#/add/4'); }
+    if (NO_METER.includes(draft.cat)) { if (!draft.name) draft.name = draft.cat === 'cat' ? 'Cat' : 'Bird feeder'; draft.unit = 'none'; draft.reading = ''; return go('#/add/4'); }
     if (!draft.name) draft.name = [draft.make, draft.model].filter(Boolean).join(' ') || (CATS[draft.cat] || CATS.other).label;
     go('#/add/3');
   },
@@ -1441,14 +1583,16 @@ const ACT = {
     if (hasMeter(m)) S.readings.push({ id: uid(), machineId: m.id, date: todayISO(), value: m.reading });
     save(); suggestSel = null; newDraft(); go('#/added/' + m.id);
   },
+  'custom-from': (el) => { customReturn = el.dataset.back; go('#/custom/' + el.dataset.id); },
   'sug-toggle': (el) => { suggestSel.on[el.dataset.key] = !suggestSel.on[el.dataset.key]; el.querySelector('.switch').classList.toggle('on', suggestSel.on[el.dataset.key]); },
   'sug-last': (el) => { if ($('#sg_date')) { suggestSel.date = val('sg_date'); suggestSel.reading = val('sg_r'); } suggestSel.last = el.dataset.v; render(); },
   'sug-save': (el) => {
     const m = M(el.dataset.id);
     templatesFor(m).filter((tp) => suggestSel.on[tp.key] && !S.items.some((i) => i.machineId === m.id && i.key === tp.key)).forEach((tp) => {
       const it = itemFromTemplate(m, tp, { isNew: m.isNew });
+      if (suggestSel.over && suggestSel.over[tp.key]) { it.every = suggestSel.over[tp.key]; it.first = null; }
       if (suggestSel.last === 'date') { const d = val('sg_date') || todayISO(); it.lastDate = d; it.lastReading = hasMeter(m) ? (num(val('sg_r')) ?? estReadingOn(m, d)) : it.lastReading; it.first = null; }
-      if (suggestSel.last === 'unknown') { it.unknown = true; it.lastDate = addMonths(todayISO(), -(it.every.months || 120)); if (it.every.u) it.lastReading = (m.reading || 0) - it.every.u; it.first = null; }
+      if (suggestSel.last === 'unknown') { it.unknown = true; it.lastDate = backDate(it.every); if (it.every.u) it.lastReading = (m.reading || 0) - it.every.u; it.first = null; }
       S.items.push(it);
     });
     save(); suggestSel = null; go('#/m/' + m.id); toast('Schedule saved');
@@ -1458,14 +1602,15 @@ const ACT = {
   'custom-save': (el) => {
     const m = M(el.dataset.mid);
     const title = val('c_title'); if (!title) { $('#c_title').focus(); return toast('Give it a name'); }
-    const u = num(val('c_u')), months = num(val('c_months'));
-    if (!u && !months) return toast('Set how often it repeats');
+    const ev = readInterval(m);
+    if (!ev.u && !hasTime(ev)) return toast('Set how often it repeats');
     let it = el.dataset.id ? I(el.dataset.id) : null;
     if (!it) { it = { id: uid(), machineId: m.id, key: null, icon: guessIcon(title), need: [], how: title, enabled: true, created: todayISO() }; S.items.push(it); }
-    it.title = title; it.every = { u: u || null, months: months || null }; it.notes = val('c_notes');
+    it.title = title; it.every = ev; it.notes = val('c_notes');
     it.lastDate = val('c_lastDate') || todayISO(); if (hasMeter(m)) it.lastReading = num(val('c_lastReading')) ?? m.reading;
     it.snoozeUntil = null;
-    save(); go(el.dataset.id ? '#/i/' + it.id : '#/m/' + m.id); toast('Saved');
+    const back = customReturn; customReturn = null;
+    save(); go(el.dataset.id ? '#/i/' + it.id : back || '#/m/' + m.id); toast('Saved');
   },
   'reset-item': (el) => { const it = I(el.dataset.id); const m = M(it.machineId); const tp = templatesFor(m).find((x) => x.key === it.key); if (!tp) return; const fresh = itemFromTemplate(m, tp); it.every = fresh.every; it.severe = fresh.severe; it.title = tp.title; save(); render(); toast('Reset to suggested'); },
   log: (el, e) => { e.stopPropagation(); closeFab(); openLog(el.dataset.id); },
@@ -1509,8 +1654,8 @@ const ACT = {
     save(); closeSheet(); go('#/m/' + m.id + '/history'); toast('Logged', () => { S = snap; save(); render(); });
   },
   snooze: (el, e) => { e.stopPropagation(); openSnooze(el.dataset.id); },
-  'snooze-set': (el) => { const it = I(el.dataset.id); const d = +el.dataset.days; closeSheet(); undoable(d ? `Snoozed ${d === 1 ? 'until tomorrow' : 'for ' + humanDays(d)}` : 'Un-snoozed', () => { it.snoozeUntil = d ? addDays(todayISO(), d) : null; }); },
-  skip: (el) => { const it = I(el.dataset.id); const m = M(it.machineId); closeSheet(); undoable('Skipped. Interval reset', () => { doLog([it.id], { machineId: m.id, title: it.title, date: todayISO(), reading: hasMeter(m) ? m.reading : null, skipped: true }); }); },
+  'snooze-set': (el) => { closeSheet(); doSnooze(el.dataset.id, +el.dataset.days); },
+  skip: (el) => { closeSheet(); doSkip(el.dataset.id); },
   reading: (el, e) => { e && e.stopPropagation(); closeFab(); openReading(el.dataset.id); },
   'reading-save': (el) => {
     const m = M(el.dataset.id); const v = num($('#np').dataset.v || '');
@@ -1592,6 +1737,7 @@ const ACT = {
     save(); go('#/m/' + m.id + '/history'); toast(f.mpg ? `${f.mpg.toFixed(1)} ${m.unit === 'km' ? 'km/L' : 'mpg'}` : 'Fuel-up saved');
   },
   'cl-toggle': (el) => el.querySelector('.check').classList.toggle('on'),
+  'pre-done': (el) => { const left = document.querySelectorAll('.check:not(.on)').length; go('#/m/' + el.dataset.mid); toast(left ? `${plural(left, 'item')} not checked` : 'All set. Have a good one'); },
   'cl-save': (el) => {
     const m = M(el.dataset.mid), c = CHECKLISTS[el.dataset.key];
     const done = c.items.filter((_, i) => $('#cl_' + i).classList.contains('on'));
@@ -1669,7 +1815,7 @@ async function doBackup() {
   const t = $('.toast'); if (t) t.remove();
   sheet(`${sheetHead('Backup ready')}
     <div class="card dark stack"><div class="row between"><span class="muted">Machines</span><b>${S.machines.length}</b></div><div class="row between"><span class="muted">Services logged</span><b>${S.logs.length}</b></div><div class="row between"><span class="muted">Photos</span><b>${Object.keys(files).length}</b></div><div class="row between"><span class="muted">Size</span><b>${(json.length / 1048576).toFixed(json.length > 1048576 ? 1 : 2)} MB</b></div></div>
-    <p class="note" style="margin:0">Save it somewhere that isn’t just this phone: Files → iCloud Drive, Google Drive, or email it to yourself. To bring it back, use Profile → Restore.</p>
+    <p class="note" style="margin:0">Save it off this phone: iCloud Drive, Google Drive, or email it to yourself.</p>
     <div class="sheet-actions"><button class="btn primary" data-act="backup-save">${icon('save', 18)}Save backup file</button></div>`);
 }
 async function restoreFile(file) {
@@ -1716,7 +1862,7 @@ async function checkNotify(force) {
   const over = r.filter((x) => x.st.state === 'over'), soon = r.filter((x) => x.st.state === 'soon');
   const bk = backupStatus();
   if (!over.length && !soon.length) {
-    if (bk && bk.over && S.settings.lastNotify !== todayISO()) { try { const reg = navigator.serviceWorker && (await navigator.serviceWorker.getRegistration()); if (reg) reg.showNotification('Time to back up your garage', { body: 'Takes 10 seconds. Profile → Back up everything.', icon: 'icon-192.png', tag: 'garage-backup' }); } catch (e) {} S.settings.lastNotify = todayISO(); save(); return; }
+    if (bk && bk.over && S.settings.lastNotify !== todayISO()) { try { const reg = navigator.serviceWorker && (await navigator.serviceWorker.getRegistration()); if (reg) reg.showNotification('Time to back up your garage', { body: 'Takes 10 seconds. Settings → Back up.', icon: 'icon-192.png', tag: 'garage-backup' }); } catch (e) {} S.settings.lastNotify = todayISO(); save(); return; }
     if (force) toast('Reminders on. Nothing due right now'); return;
   }
   const title = over.length ? `${plural(over.length, 'thing')} overdue` : `${plural(soon.length, 'thing')} due soon`;
@@ -1741,8 +1887,32 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { closeSheet(); closeFab(); }
 });
 window.addEventListener('scroll', () => { const t = document.getElementById('itemHdrTitle'); if (t) t.style.opacity = window.scrollY > 170 ? 1 : 0; }, { passive: true });
+document.addEventListener('input', (e) => {
+  const i = e.target;
+  if (!i.matches || !i.matches('input[data-commas]')) return;
+  const before = i.value, caretFromEnd = before.length - (i.selectionStart ?? before.length);
+  const after = withCommas(before);
+  if (after !== before) { i.value = after; const pos = Math.max(0, after.length - caretFromEnd); try { i.setSelectionRange(pos, pos); } catch (err) {} }
+}, true);
 document.addEventListener('change', (e) => { const el = e.target.closest('[data-change]'); if (el && CHANGE[el.dataset.change]) CHANGE[el.dataset.change](el, e); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { checkNotify(); if (!$('#scrim') && !route().some((x) => ['add', 'custom', 'receipt', 'warranty', 'note', 'fuel', 'specs', 'edit'].includes(x))) render(); } });
+
+/* M splash: plays once per launch, tap to skip */
+function runSplash() {
+  const sp = document.getElementById('splash'); if (!sp) return;
+  const v = document.getElementById('splashVid');
+  let done = false;
+  const hide = () => { if (done) return; done = true; sp.classList.add('out'); setTimeout(() => sp.remove(), 450); };
+  sp.addEventListener('click', hide);
+  let stilled = false;
+  const still = () => { if (stilled || done || !v.isConnected) return; stilled = true; v.outerHTML = '<img src="loader-poster.jpg" alt="">'; setTimeout(hide, 800); };
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return still();
+  v.addEventListener('ended', () => setTimeout(hide, 150));
+  v.addEventListener('error', still, true);
+  const p = v.play(); if (p && p.catch) p.catch(still);
+  setTimeout(hide, 4500);
+}
+runSplash();
 
 (async function boot() {
   await load();

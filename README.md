@@ -1,6 +1,6 @@
 # Garage
 
-A maintenance tracker for trucks, cars, motorcycles, e-bikes, electric dirt bikes, mowers, tractors, generators, pressure washers, log splitters and anything else with an engine. Built from the "IOT project" Figma design (same dark look, Bebas Neue + Public Sans, red overdue cards).
+A maintenance tracker for trucks, cars, camper vans (diesel Sprinter), RVs, motorcycles, e-bikes, electric dirt bikes, mowers, tractors, generators, pressure washers, log splitters and anything else with an engine. Built from the "IOT project" Figma design (same dark look, Bebas Neue + Public Sans, red overdue cards).
 
 Live at: https://mtsteiner17-beep.github.io/bills-garage/
 
@@ -25,7 +25,11 @@ It works with no signal after the first load. Everything is saved on the phone i
 - Import history from VMT, Fuelly, Drivvo or any spreadsheet CSV (auto-matches columns and maintenance items)
 - Quick schedule editor: change the interval or when it was last done in two taps
 - Add to Home Screen walkthrough for iPhone (Safari/Chrome) and Android
-- A cat. Yes, really.
+- Cats and bird feeders (day-based reminders like seed refills)
+- Pre-trip / before-you-use checklists per machine type
+- Swipe a task left to snooze a week, right to skip
+- Four garage themes: Shop, Pegboard, Diamond plate, Pole barn
+- Loading screen: Masen's "m" mark (loader.mp4 / loader.webm)
 - Icons from Lucide (ISC license)
 
 ## Files
