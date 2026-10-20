@@ -1,4 +1,4 @@
-/* Bill's Garage — app logic (vanilla JS, no build step, data stays on the device) */
+/* Garage — app logic (vanilla JS, no build step, data stays on the device) */
 'use strict';
 
 /* ======================= storage (IndexedDB) ======================= */
@@ -38,7 +38,7 @@ function idbDel(store, key) {
 
 const blank = () => ({
   v: 2,
-  settings: { garage: "Bill's Garage", distUnit: 'mi', leadDays: 14, onboarded: false, notify: false, lastNotify: '', lastBackup: '' },
+  settings: { garage: 'My Garage', distUnit: 'mi', leadDays: 14, onboarded: false, notify: false, lastNotify: '', lastBackup: '', backupEvery: 30, backupSnooze: '', firstUse: '', installDismissed: false },
   machines: [], items: [], logs: [], notes: [], receipts: [], warranties: [], fuel: [], readings: [],
 });
 let S = blank();
@@ -55,39 +55,71 @@ async function load() {
   let st = await idbGet('kv', 'state');
   if (!st) { try { st = JSON.parse(localStorage.getItem('bg-state-mirror') || 'null'); } catch (e) {} }
   if (st && st.machines) { S = Object.assign(blank(), st); S.settings = Object.assign(blank().settings, st.settings || {}); }
+  if (!S.settings.firstUse) { S.settings.firstUse = todayISO(); save(); }
 }
 
 /* photos */
 const urlCache = {};
-async function putPhoto(blob) { const id = uid(); await idbPut('files', id, blob); return id; }
+async function putPhoto(blob) {
+  const id = uid();
+  let rec = blob;
+  try { rec = { type: blob.type || 'image/jpeg', buf: await blob.arrayBuffer() }; } catch (e) {}
+  await idbPut('files', id, rec);
+  urlCache[id] = URL.createObjectURL(blob);
+  return id;
+}
+async function getPhotoBlob(id) {
+  const r = await idbGet('files', id);
+  if (!r) return null;
+  if (r instanceof Blob) return r;
+  if (r.buf) return new Blob([r.buf], { type: r.type || 'image/jpeg' });
+  return null;
+}
 async function photoURL(id) {
   if (!id) return null;
   if (urlCache[id]) return urlCache[id];
-  const b = await idbGet('files', id);
+  const b = await getPhotoBlob(id);
   if (!b) return null;
   urlCache[id] = URL.createObjectURL(b);
   return urlCache[id];
 }
+/* every photo the app knows about, so they can be loaded once at start */
+const allPhotoIds = () => [...S.machines.map((m) => m.photoId), ...S.receipts.map((r) => r.photoId)].filter(Boolean);
+async function warmPhotos() { await Promise.all(allPhotoIds().map((id) => photoURL(id))); }
+/* photo layer: shows instantly when already loaded, otherwise fades in. Covers the line-art placeholder. */
+function photoTag(id, cls = 'ph') {
+  if (!id) return '';
+  const u = urlCache[id];
+  return `<img class="${cls}${u ? ' ready' : ''}" data-fid="${id}" alt="" decoding="async" ${u ? `src="${u}"` : ''}>`;
+}
 function hydratePhotos(root = document) {
   root.querySelectorAll('img[data-fid]').forEach(async (img) => {
+    if (img.getAttribute('src')) { img.classList.add('ready'); img.hidden = false; return; }
     const u = await photoURL(img.dataset.fid);
-    if (u) { img.src = u; img.hidden = false; const ph = img.parentElement.querySelector('.art-svg'); if (ph) ph.style.display = 'none'; }
-  });
-}
-function compress(file, max = 1600, q = 0.82) {
-  return new Promise((res) => {
-    const img = new Image();
-    const u = URL.createObjectURL(file);
-    img.onload = () => {
-      const s = Math.min(1, max / Math.max(img.width, img.height));
-      const c = document.createElement('canvas');
-      c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
-      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-      c.toBlob((b) => { URL.revokeObjectURL(u); res(b || file); }, 'image/jpeg', q);
-    };
-    img.onerror = () => { URL.revokeObjectURL(u); res(file); };
+    if (!u) { img.remove(); return; }
+    img.onload = () => { img.classList.add('ready'); img.hidden = false; };
     img.src = u;
   });
+}
+/* shrink + fix rotation (uses the photo's EXIF orientation) before saving */
+async function compress(file, max = 1600, q = 0.82) {
+  let src = null, w = 0, h = 0, url = null;
+  try {
+    if (window.createImageBitmap) { src = await createImageBitmap(file, { imageOrientation: 'from-image' }); w = src.width; h = src.height; }
+  } catch (e) { src = null; }
+  if (!src) {
+    src = await new Promise((res) => { const img = new Image(); url = URL.createObjectURL(file); img.onload = () => res(img); img.onerror = () => res(null); img.src = url; });
+    if (!src) { if (url) URL.revokeObjectURL(url); return file; }
+    w = src.naturalWidth; h = src.naturalHeight;
+  }
+  const sc = Math.min(1, max / Math.max(w, h));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(w * sc)); c.height = Math.max(1, Math.round(h * sc));
+  const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(src, 0, 0, c.width, c.height);
+  if (src.close) src.close();
+  if (url) URL.revokeObjectURL(url);
+  return new Promise((res) => c.toBlob((b) => res(b || file), 'image/jpeg', q));
 }
 
 /* ======================= helpers ======================= */
@@ -241,8 +273,10 @@ function route() {
 function render() {
   closeFab();
   const r = route();
-  if (!S.settings.onboarded && r[0] !== 'welcome' && r[0] !== 'add' && r[0] !== 'added' && r[0] !== 'suggest') { location.replace('#/welcome/1'); return; }
+  if (!S.settings.onboarded && !['welcome', 'add', 'added', 'suggest', 'install'].includes(r[0])) { location.replace('#/welcome/1'); return; }
   const [a, b, c, d] = r;
+  const same = render.lastHash === location.hash, y = window.scrollY;
+  render.lastHash = location.hash;
   let html = '';
   try {
     if (!a) html = vGarage();
@@ -268,10 +302,14 @@ function render() {
     else if (a === 'fuel' && M(b)) html = vFuel(b);
     else if (a === 'checklist' && M(b)) html = vChecklist(b, c);
     else if (a === 'archived') html = vArchived();
+    else if (a === 'install') html = vInstall();
+    else if (a === 'import') html = vImport();
     else html = vGarage();
   } catch (e) { console.error(e); html = `<div class="screen"><div class="empty"><b>Something went wrong.</b><span>${esc(e.message)}</span><button class="btn secondary" data-act="home">Back to garage</button></div></div>`; }
   app().innerHTML = html;
-  window.scrollTo(0, 0);
+  if (same) { const sc = app().firstElementChild; if (sc) sc.style.animation = 'none'; app().querySelectorAll('.stagger > *').forEach((x) => (x.style.animation = 'none')); window.scrollTo(0, y); } else window.scrollTo(0, 0);
+  const gname = S.settings.garage || 'Garage';
+  if (document.title !== gname) { document.title = gname; const mt = document.querySelector('meta[name="apple-mobile-web-app-title"]'); if (mt) mt.content = gname; }
   hydratePhotos(app());
   after.forEach((f) => f()); after = [];
 }
@@ -280,7 +318,7 @@ let after = [];
 /* ======================= shared UI pieces ======================= */
 const backBtn = (to) => `<button class="rbtn" data-act="back" data-to="${esc(to || '#/')}" aria-label="Back">${icon('back', 18)}</button>`;
 function topBar(title, to, right = '') {
-  return `<div class="hdr"><div class="left">${backBtn(to)}<div class="h-title sm">${esc(title)}</div></div>${right}</div>`;
+  return `<div class="hdr sticky"><div class="left">${backBtn(to)}<div class="h-title sm">${esc(title)}</div></div>${right}</div>`;
 }
 const steps = (n, on) => `<div class="steps">${Array.from({ length: n }, (_, i) => `<i class="${i < on ? 'on' : ''}"></i>`).join('')}</div>`;
 const field = (label, inner) => `<label class="field"><span>${esc(label)}</span>${inner}</label>`;
@@ -303,7 +341,7 @@ function machineCard(m, large) {
   const rd = hasMeter(m) && !large ? `<span class="reading">${fmtN(m.reading, UNIT_LABEL[m.unit])}</span>` : '';
   const tag = large ? 'div' : 'button';
   return `<${tag} class="mcard ${large ? 'large' : ''}" ${large ? '' : `data-act="go" data-to="#/m/${m.id}"`} aria-label="${esc(m.name)}">
-    <div class="photo">${art(m.cat, large ? 96 : 76)}${m.photoId ? `<img data-fid="${m.photoId}" alt="" hidden>` : ''}</div>
+    <div class="photo">${art(m.cat, large ? 96 : 76)}${photoTag(m.photoId)}</div>
     <div class="shade"></div>${rd}
     <div class="info"><div class="name">${esc(m.name)}</div><div class="chips">${chips}</div></div>
   </${tag}>`;
@@ -351,7 +389,7 @@ function vWelcome(n) {
     </div>`;
   }
   if (n === 2) return `<div class="screen stagger">
-    ${topBar('', '#/welcome/1')}${steps(3, 1)}
+    ${topBar('', '#/welcome/1')}${steps(4, 1)}
     <div class="list">${demoRow('over')}${demoRow('ok')}</div>
     <h2 class="headline">Never miss a service</h2>
     <p class="note">Reminders by miles, engine hours or date, whichever comes first. It learns how much you use each machine and estimates when things are due.</p>
@@ -359,7 +397,7 @@ function vWelcome(n) {
     <div class="actions-bottom"><button class="btn primary" data-act="go" data-to="#/welcome/3">Next</button><button class="btn text" data-act="go" data-to="#/welcome/4">Skip</button></div>
   </div>`;
   if (n === 3) return `<div class="screen stagger">
-    ${topBar('', '#/welcome/2')}${steps(3, 2)}
+    ${topBar('', '#/welcome/2')}${steps(4, 2)}
     <h2 class="headline">Everything in one spot</h2>
     <p class="note">Service history, receipts, warranties, notes and part numbers live with each machine. It all stays on this phone, even with no signal in the garage.</p>
     <div class="group">
@@ -370,18 +408,29 @@ function vWelcome(n) {
     <div class="spacer"></div>
     <div class="actions-bottom"><button class="btn primary" data-act="go" data-to="#/welcome/4">Next</button><button class="btn text" data-act="go" data-to="#/welcome/4">Skip</button></div>
   </div>`;
+  if (n === 4) {
+    const cur = ['My Garage', "Bill's Garage"].includes(S.settings.garage) ? '' : S.settings.garage;
+    after.push(() => { const i = $('#garageName'); if (i && !cur) setTimeout(() => i.focus(), 400); });
+    return `<div class="screen stagger">
+    ${topBar('', '#/welcome/3')}${steps(4, 3)}
+    <h2 class="headline">Name your garage</h2>
+    <p class="note">This shows at the top of the app and on your Home Screen icon. You can change it anytime in Profile.</p>
+    <input class="inp bebas" id="garageName" value="${esc(cur)}" placeholder="e.g. Bill's Garage" maxlength="28" autocapitalize="words" enterkeyhint="next" style="font-size:36px;height:72px;text-transform:uppercase">
+    <div class="picks">${["The Shop", "The Pole Barn", "Shed HQ", "Dad's Garage", "The Back 40"].map((x) => `<button class="pick" data-act="name-pick" data-v="${esc(x)}">${esc(x)}</button>`).join('')}</div>
+    <div class="spacer"></div>
+    <div class="actions-bottom"><button class="btn primary" data-act="onb-name">Next</button></div>
+  </div>`;
+  }
+  const standalone = isStandalone();
   return `<div class="screen stagger">
-    ${topBar('', '#/welcome/3')}${steps(3, 3)}
-    <h2 class="headline">Stay on schedule</h2>
-    <p class="note">Get a heads-up when something's coming due. On iPhone, add this app to your Home Screen first (Share → Add to Home Screen) so reminders can show up.</p>
-    <div class="group">
-      <div class="trow"><div class="grow"><div class="t">Name your garage</div><div class="d">Shows at the top of the home screen</div></div></div>
-      ${inp('garageName', S.settings.garage, "Bill's Garage")}
-    </div>
+    ${topBar('', '#/welcome/4')}${steps(4, 4)}
+    <h2 class="headline">${standalone ? 'Stay on schedule' : 'Put it on your Home Screen'}</h2>
+    ${standalone ? `<p class="note">Turn on reminders and the app will give you a heads-up when you open it and something is due.</p>` : `<p class="note">It works like a real app from there: full screen, works offline, and reminders can show up. Do this <b style="color:#fff">before</b> you add anything, because the Home Screen app keeps its own data.</p>
+    ${installSteps(detectPlatform(), true)}`}
     <div class="spacer"></div>
     <div class="actions-bottom">
-      <button class="btn primary" data-act="finish-onboard" data-notify="1">Turn on reminders & add a machine</button>
-      <button class="btn text" data-act="finish-onboard">Not now, just add a machine</button>
+      ${standalone ? `<button class="btn primary" data-act="finish-onboard" data-notify="1">Turn on reminders & add a machine</button><button class="btn text" data-act="finish-onboard">Not now, just add a machine</button>`
+        : `<button class="btn primary" data-act="finish-onboard">Continue</button><button class="btn text" data-act="go" data-to="#/install">More help adding it</button>`}
     </div>
   </div>`;
 }
@@ -401,6 +450,53 @@ function setupHero() {
   img.src = 'lineup.jpg';
 }
 
+/* ======================= add to home screen ======================= */
+let installEvt = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; });
+window.addEventListener('appinstalled', () => { installEvt = null; toast('Installed. Open it from your Home Screen'); });
+const isStandalone = () => (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+function detectPlatform() {
+  const ua = navigator.userAgent;
+  const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  if (ios) return /CriOS/.test(ua) ? 'ios-chrome' : /FxiOS|EdgiOS/.test(ua) ? 'ios-other' : 'ios-safari';
+  if (/Android/.test(ua)) return 'android';
+  return 'desktop';
+}
+const IOS_SHARE = '<svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M6 11H5v10h14V11h-1"/></svg>';
+function installSteps(pf, compact) {
+  const step = (n, t, d, demo) => `<div class="istep"><div class="n">${n}</div><div class="grow"><div class="t">${t}</div>${d ? `<div class="d">${d}</div>` : ''}${demo || ''}</div></div>`;
+  if (pf === 'android' || pf === 'desktop') {
+    return `<div class="stack">${installEvt ? `<button class="btn primary" data-act="install-now">${icon('download', 18)}Install the app</button>` : ''}
+      ${step(1, 'Open the Chrome menu', 'The three dots at the top right.', `<span class="demo plain">${icon('more', 16)}</span>`)}
+      ${step(2, 'Tap “Add to Home screen” or “Install app”', '', `<span class="demo plain">${icon('phone', 16)}Install app</span>`)}
+      ${step(3, 'Tap Install', 'The icon shows up with your other apps.')}</div>`;
+  }
+  if (pf === 'ios-chrome') {
+    return `<div class="stack">
+      ${step(1, 'Tap the Share button', 'In Chrome it’s at the top right, next to the address bar.', `<span class="demo">${IOS_SHARE} Share</span>`)}
+      ${step(2, 'Tap “Add to Home Screen”', 'You may need to scroll down the list.', `<span class="demo plain">${icon('squareplus', 16)} Add to Home Screen</span>`)}
+      ${step(3, 'Tap Add', 'Then open the app from the new icon, not from Chrome.')}
+      ${compact ? '' : `<p class="note">Safari works best on iPhone for reminders. Same steps: open this site in Safari, tap Share (or ··· then Share), then Add to Home Screen.</p>`}</div>`;
+  }
+  return `<div class="stack">
+    ${step(1, 'Tap the Share button', 'At the bottom of Safari. On newer iPhones, tap ··· first, then Share.', `<span class="demo">${IOS_SHARE} Share</span>`)}
+    ${step(2, 'Tap “Add to Home Screen”', 'Scroll down the list if you don’t see it.', `<span class="demo plain">${icon('squareplus', 16)} Add to Home Screen</span>`)}
+    ${step(3, 'Leave “Open as Web App” on, tap Add', 'Then open it from the new icon from now on.')}
+  </div>`;
+}
+let installTab = null;
+function vInstall() {
+  const pf = installTab || detectPlatform();
+  const tabs = [['ios-safari', 'iPhone · Safari'], ['ios-chrome', 'iPhone · Chrome'], ['android', 'Android']];
+  return `<div class="screen">${topBar('Add to Home Screen', S.settings.onboarded ? '#/profile' : '#/welcome/5')}
+    ${isStandalone() ? `<div class="nudge"><div class="ibox" style="background:rgba(18,255,84,.15);color:var(--green)">${icon('check', 20)}</div><div class="grow"><div class="t">You’re already using the Home Screen app</div><div class="d">Nothing else to do.</div></div></div>` : ''}
+    <div class="seg">${tabs.map(([k, l]) => `<button class="${(pf === k || (pf === 'ios-other' && k === 'ios-safari') || (pf === 'desktop' && k === 'android')) ? 'on' : ''}" data-act="install-tab" data-v="${k}" style="font-size:13px">${l}</button>`).join('')}</div>
+    ${installSteps(pf)}
+    <div class="callout"><b>Heads up:</b> the Home Screen app keeps its own copy of your data, separate from the browser. If you already logged things in the browser, back up here first, then open the new icon and use Profile → Restore.</div>
+    ${S.machines.length ? `<button class="btn secondary" data-act="backup">${icon('save', 18)}Back up what’s here first</button>` : ''}
+  </div>`;
+}
+
 /* ======================= garage (home) ======================= */
 function vGarage() {
   const ms = S.machines.filter((m) => !m.archived);
@@ -418,6 +514,7 @@ function vGarage() {
     const d = daysBetween(todayISO(), w.end);
     if (d >= 0 && d <= 60) nudges.push(`<button class="nudge warn" data-act="go" data-to="#/m/${m.id}/warranty"><div class="ibox">${icon('shield', 20)}</div><div class="grow"><div class="t">Warranty ends in ${humanDays(d)}</div><div class="d">${esc(m.name)} · ${esc(w.coverage || w.provider || 'Coverage')}</div></div></button>`);
   });
+  if (ms.length && !isStandalone() && !S.settings.installDismissed) nudges.push(`<div class="nudge"><button class="row grow" style="text-align:left" data-act="go" data-to="#/install"><div class="ibox">${icon('squareplus', 20)}</div><div class="grow"><div class="t">Add to your Home Screen</div><div class="d">Opens like an app and keeps your data safer</div></div></button><button class="rbtn sm" data-act="install-dismiss" aria-label="Dismiss">${icon('x', 14)}</button></div>`);
   const recallM = ms.filter((m) => m.recalls && m.recalls.length && !m.recallsSeen);
   recallM.forEach((m) => nudges.push(`<button class="nudge alert" data-act="go" data-to="#/m/${m.id}/recalls"><div class="ibox">${icon('alert', 20)}</div><div class="grow"><div class="t">${plural(m.recalls.length, 'recall')} found</div><div class="d">${esc(m.name)} · tap to review</div></div></button>`));
 
@@ -429,10 +526,10 @@ function vGarage() {
     </div>
     ${!ms.length ? `<div class="card dark" style="text-align:center;padding:28px 18px">${art('truck', 84)}<h2 class="headline" style="margin:8px 0 6px">Add your first machine</h2><p class="note" style="margin-bottom:16px">Truck, mower, generator, anything with an engine. We'll suggest a maintenance schedule for it.</p><button class="btn primary" data-act="go" data-to="#/add">Add machine</button></div>` : ''}
     ${nudges.join('')}
-    ${urgent.length ? `<div class="sec-title">Needs attention <button class="link" data-act="go" data-to="#/schedule">See all</button></div><div class="list">${urgent.slice(0, 5).map((x) => mrow(x.it, x.st)).join('')}</div>${urgent.length > 5 ? `<button class="btn secondary" data-act="go" data-to="#/schedule">${urgent.length - 5} more need attention</button>` : ''}` : ''}
+    ${urgent.length || backupRow() ? `<div class="sec-title">Needs attention <button class="link" data-act="go" data-to="#/schedule">See all</button></div><div class="list">${backupRow()}${urgent.slice(0, 5).map((x) => mrow(x.it, x.st)).join('')}</div>${urgent.length > 5 ? `<button class="btn secondary" data-act="go" data-to="#/schedule">${urgent.length - 5} more need attention</button>` : ''}` : ''}
     ${later.length ? `<div class="sec-title">${urgent.length ? 'Coming up' : 'Upcoming maintenance'}</div><div class="list">${later.map((x) => mrow(x.it, x.st)).join('')}</div>` : ''}
     ${ms.length && !r.length ? empty('wrench', 'Nothing scheduled yet', 'Open a machine and add maintenance to track.') : ''}
-    ${ms.length && r.length && !urgent.length ? `<div class="empty" style="padding:8px">${icon('check', 18)}<span>Nothing due right now. Nice.</span></div>` : ''}
+    ${ms.length && r.length && !urgent.length && !backupRow() ? `<div class="empty" style="padding:8px">${icon('check', 18)}<span>Nothing due right now. Nice.</span></div>` : ''}
   </div>${nav('garage')}`;
 }
 
@@ -446,19 +543,17 @@ function vMachine(id, tab) {
   else if (tab === 'warranty') body = machineDocs(m);
   else body = machineUpcoming(m);
   return `<div class="screen">
-    <div class="fixed-top">
-      <div class="hdr"><div class="left">${backBtn('#/')}<div class="h-title sm">${esc(m.name)}</div></div>
+      <div class="hdr sticky"><div class="left">${backBtn('#/')}<div class="h-title sm">${esc(m.name)}</div></div>
         <div class="h-actions"><button class="rbtn" data-act="machine-menu" data-id="${m.id}" aria-label="More">${icon('more', 18)}</button></div></div>
       ${machineCard(m, true)}
-      <div class="row between" style="font-size:13px;color:var(--muted)"><span>${[m.year, m.make, m.model].filter(Boolean).map(esc).join(' ') || esc(CATS[m.cat]?.label)}</span>${hasMeter(m) ? `<button class="smallbtn" data-act="reading" data-id="${m.id}">${icon('gauge', 14)} ${fmtN(m.reading, UNIT_LABEL[m.unit])}</button>` : ''}</div>
-      <div class="tabs">
+      <div class="row between" style="font-size:13px;color:var(--muted);margin-top:-6px"><span>${[m.year, m.make, m.model].filter(Boolean).map(esc).join(' ') || esc(CATS[m.cat]?.label)}</span>${hasMeter(m) ? `<button class="smallbtn" data-act="reading" data-id="${m.id}">${icon('gauge', 14)} ${fmtN(m.reading, UNIT_LABEL[m.unit])}</button>` : ''}</div>
+      <div class="tabs sticky">
         <button class="${tab === 'upcoming' ? 'on' : ''}" data-act="go" data-to="#/m/${m.id}">Upcoming</button>
         <button class="${tab === 'history' ? 'on' : ''}" data-act="go" data-to="#/m/${m.id}/history">History</button>
         <button class="${tab === 'notes' ? 'on' : ''}" data-act="go" data-to="#/m/${m.id}/notes">Notes</button>
         <button class="${tab === 'warranty' ? 'on' : ''}" data-act="go" data-to="#/m/${m.id}/warranty">Docs</button>
         <button class="rbtn light" data-act="fab" data-id="${m.id}" aria-label="Add">${icon('plus', 20)}</button>
       </div>
-    </div>
     ${body}
   </div>`;
 }
@@ -468,9 +563,9 @@ function machineUpcoming(m) {
   if (!r.length) return empty('wrench', 'No maintenance tracked', 'Pick from suggestions for this machine or add your own.', `<button class="btn primary" data-act="go" data-to="#/m/${m.id}/add-maint" style="width:auto;padding:0 24px">Add maintenance</button>`);
   return `<div class="list">${r.map((x) => mrow(x.it, x.st, { showMachine: false })).join('')}</div>
     <button class="dashed" data-act="go" data-to="#/m/${m.id}/add-maint">${icon('plus', 18)}Add maintenance</button>
-    <div class="sec-title">Seasonal checklists</div>
+    ${m.cat === 'cat' ? '' : `<div class="sec-title">Seasonal checklists</div>
     <div class="group">${Object.entries(CHECKLISTS).map(([k, c]) => `<button class="lrow" data-act="go" data-to="#/checklist/${m.id}/${k}"><div class="ibox">${icon(c.icon, 18)}</div><div class="grow"><div class="t">${c.title}</div><div class="d">${c.items.length} steps · logs as one entry</div></div></button>`).join('')}</div>
-    <button class="lrow" data-act="go" data-to="#/m/${m.id}/specs"><div class="ibox">${icon('oil', 18)}</div><div class="grow"><div class="t">Specs & part numbers</div><div class="d">${specSummary(m) || 'Oil type, filters, plugs, tire sizes'}</div></div></button>
+    <button class="lrow" data-act="go" data-to="#/m/${m.id}/specs"><div class="ibox">${icon('oil', 18)}</div><div class="grow"><div class="t">Specs & part numbers</div><div class="d">${specSummary(m) || 'Oil type, filters, plugs, tire sizes'}</div></div></button>`}
     ${paused.length ? `<p class="note">${plural(paused.length, 'item')} turned off. <button class="link muted" style="text-decoration:underline" data-act="go" data-to="#/m/${m.id}/add-maint">Manage</button></p>` : ''}`;
 }
 function specSummary(m) { const s = m.specs || {}; return [s.oil, s.oilFilter].filter(Boolean).join(' · '); }
@@ -508,7 +603,7 @@ function machineDocs(m) {
     ${ws.length ? `<div class="group">${ws.map((w) => { const d = w.end ? daysBetween(todayISO(), w.end) : null; const tag = d == null ? '' : d < 0 ? '<span class="pill-tag red">Expired</span>' : d <= 60 ? `<span class="pill-tag yellow">${humanDays(d)} left</span>` : `<span class="pill-tag green">Active</span>`; return `<button class="lrow" data-act="go" data-to="#/warranty/${m.id}/${w.id}"><div class="ibox">${icon('shield', 18)}</div><div class="grow"><div class="t">${esc(w.provider || 'Warranty')}</div><div class="d">${esc(w.coverage || '')}${w.end ? ` · ends ${fmtDate(w.end, true)}` : ''}${w.limit ? ` or ${fmtN(w.limit, UNIT_LABEL[m.unit])}` : ''}</div></div>${tag}</button>`; }).join('')}</div>` : `<p class="note">No warranties added.</p>`}
     <button class="dashed" data-act="go" data-to="#/warranty/${m.id}">${icon('plus', 18)}Add warranty</button>
     <div class="sec-title">Receipts</div>
-    ${rs.length ? `<div class="group">${rs.map((r) => `<button class="lrow" data-act="go" data-to="#/receipt/${m.id}/${r.id}">${r.photoId ? `<img class="thumb" data-fid="${r.photoId}" alt="" hidden>` : `<div class="ibox">${icon('receipt', 18)}</div>`}<div class="grow"><div class="t">${esc(r.vendor || 'Receipt')}</div><div class="d">${r.date ? fmtDate(r.date, true) : ''}${r.category ? ' · ' + esc(r.category) : ''}</div></div><div class="v">${money(r.total)}</div></button>`).join('')}</div>` : `<p class="note">No receipts yet.</p>`}
+    ${rs.length ? `<div class="group">${rs.map((r) => `<button class="lrow" data-act="go" data-to="#/receipt/${m.id}/${r.id}">${r.photoId ? photoTag(r.photoId, 'thumb') : `<div class="ibox">${icon('receipt', 18)}</div>`}<div class="grow"><div class="t">${esc(r.vendor || 'Receipt')}</div><div class="d">${r.date ? fmtDate(r.date, true) : ''}${r.category ? ' · ' + esc(r.category) : ''}</div></div><div class="v">${money(r.total)}</div></button>`).join('')}</div>` : `<p class="note">No receipts yet.</p>`}
     <button class="dashed" data-act="go" data-to="#/receipt/${m.id}">${icon('camera', 18)}Add receipt</button>
     ${isVehicle(m) ? `<button class="lrow" data-act="go" data-to="#/m/${m.id}/recalls"><div class="ibox">${icon('alert', 18)}</div><div class="grow"><div class="t">Safety recalls</div><div class="d">${m.recalls ? (m.recalls.length ? plural(m.recalls.length, 'recall') + ' found' : 'None found') + (m.recallsChecked ? ' · checked ' + fmtDate(m.recallsChecked) : '') : 'Check NHTSA for open recalls'}</div></div></button>` : ''}`;
 }
@@ -528,19 +623,30 @@ function vItem(id) {
   else (specMap[it.icon] || []).forEach((k) => specs[k] && known.push([specLabel(k), specs[k]]));
   const needRows = known.length ? known : need.map((n) => [n, '']);
   return `<div class="screen">
-    <div class="hdr"><div class="left">${backBtn('#/m/' + m.id)}</div><div class="h-actions"><button class="rbtn" data-act="item-menu" data-id="${it.id}" aria-label="More">${icon('more', 18)}</button></div></div>
-    <div class="photo-hero">${art(m.cat, 110)}${m.photoId ? `<img data-fid="${m.photoId}" alt="" hidden>` : ''}</div>
+    <div class="hdr sticky"><div class="left">${backBtn('#/m/' + m.id)}<div class="h-title sm" style="opacity:.0" id="itemHdrTitle">${esc(it.title)}</div></div><div class="h-actions"><button class="rbtn" data-act="item-menu" data-id="${it.id}" aria-label="More">${icon('more', 18)}</button></div></div>
+    <div class="photo-hero">${art(m.cat, 110)}${photoTag(m.photoId)}</div>
     <div><h1 class="big-title">${esc(it.title)}</h1><p class="note" style="margin-top:6px">${esc(m.name)} · ${esc(evText || 'no interval')}${m.severe && it.severe ? ' · severe duty' : ''}</p></div>
     ${mrow(it, st, { plain: true })}
     ${st.state === 'over' ? `<div class="two"><button class="btn primary" data-act="log" data-id="${it.id}">Log it</button><button class="btn secondary" data-act="snooze" data-id="${it.id}">Snooze</button></div>` : ''}
+    <div class="sched">
+      <button class="lrow" data-act="sched" data-id="${it.id}"><div class="ibox">${icon('history', 18)}</div><div class="grow"><div class="t">Repeats</div><div class="d">${esc(evText ? evText[0].toUpperCase() + evText.slice(1) : 'No interval set')}${hasMeter(m) && ev.u && ev.months ? ', whichever first' : ''}</div></div><span class="pill-tag">Change</span></button>
+      <button class="lrow" data-act="sched" data-id="${it.id}"><div class="ibox">${icon('calendar', 18)}</div><div class="grow"><div class="t">Last done</div><div class="d">${it.unknown && !hist.length ? 'Not sure yet · set it so reminders are right' : fmtDate(it.lastDate, true) + (hasMeter(m) && it.lastReading != null ? ' at ' + fmtN(it.lastReading, u) : '')}</div></div><span class="pill-tag">Change</span></button>
+    </div>
     <a class="linkrow" href="https://www.youtube.com/results?search_query=${encodeURIComponent([m.year, m.make, m.model, it.how || it.title].filter(Boolean).join(' '))}" target="_blank" rel="noopener">${icon('play', 18)}How to: ${esc(it.title.toLowerCase())} ›</a>
     <div class="sec-title">What you need <button class="link" data-act="go" data-to="#/m/${m.id}/specs">Edit specs</button></div>
-    <div class="card">${needRows.length ? needRows.map(([a, b]) => `<div class="need"><div><div style="font-weight:600">${esc(a)}</div>${b ? `<div class="muted" style="font-size:13px">${esc(b)}</div>` : ''}</div><a class="smallbtn" target="_blank" rel="noopener" href="https://www.google.com/search?q=${encodeURIComponent([m.make, m.model, b || a].filter(Boolean).join(' '))}">Find ›</a></div>`).join('') : `<p class="note">Add part numbers in Specs so they show up here.</p>`}</div>
+    <div class="card">${needRows.length ? needRows.map(([a, b]) => `<div class="need"><div><div style="font-weight:600">${esc(a)}</div>${b ? `<div class="muted" style="font-size:13px">${esc(b)}</div>` : ''}</div><a class="smallbtn" target="_blank" rel="noopener" href="https://www.google.com/search?q=${encodeURIComponent(partQuery(m, a, b))}">Find ›</a></div>`).join('') : `<p class="note">Add part numbers in Specs so they show up here.</p>`}</div>
     ${it.notes ? `<div class="card dark"><div class="muted" style="font-size:12px;margin-bottom:4px">Notes</div><div style="white-space:pre-wrap">${esc(it.notes)}</div></div>` : ''}
     <div class="sec-title">History</div>
     ${hist.length ? `<div class="group">${hist.map((l) => `<button class="lrow" data-act="edit-log" data-id="${l.id}"><div class="ibox">${icon(l.skipped ? 'snooze' : it.icon, 18)}</div><div class="grow"><div class="t">${l.skipped ? 'Skipped' : fmtDate(l.date, true)}</div><div class="d">${l.skipped ? fmtDate(l.date, true) : ''}${l.reading != null ? fmtN(l.reading, u) : ''}${l.shop ? ' · ' + esc(l.shop) : ''}</div></div><div class="v">${money(l.cost)}</div></button>`).join('')}</div>` : `<p class="note">Not logged yet${it.lastDate && !it.unknown ? ` · counting from ${fmtDate(it.lastDate, true)}` : ''}.</p>`}
-    <button class="btn secondary" data-act="go" data-to="#/custom/${m.id}/${it.id}">${icon('edit', 18)}Edit interval</button>
+    <button class="btn text" data-act="go" data-to="#/custom/${m.id}/${it.id}">${icon('edit', 16)}Rename or add notes</button>
   </div>`;
+}
+/* parts search: year + make + model + the part, so results fit the exact machine */
+function partQuery(m, label, value) {
+  label = String(label || '').replace(/\s*\(.*?\)/g, '').trim();
+  const base = [m.year, m.make, m.model].filter(Boolean).join(' ');
+  if (value && /\d/.test(value) && /[A-Za-z]/.test(value) && value.length < 30) return `${value} ${label}`.trim() + (base ? ` ${base}` : '');
+  return [base, value || label].filter(Boolean).join(' ');
 }
 const SPEC_FIELDS = [['oil', 'Engine oil type', 'e.g. 10W-30 synthetic'], ['oilCap', 'Oil capacity', 'e.g. 2 qt with filter'], ['oilFilter', 'Oil filter part #', 'e.g. Kohler 52 050 02-S'], ['airFilter', 'Air filter part #', ''], ['fuelFilter', 'Fuel filter part #', ''], ['plug', 'Spark plug', 'e.g. NGK BPR5ES, gap .030"'], ['blade', 'Blades', 'e.g. 54" high-lift, 3 per set'], ['belt', 'Belt(s)', ''], ['battery', 'Battery', 'e.g. Group 65, 750 CCA'], ['tires', 'Tire size & pressure', 'e.g. 275/65R18 · 35 psi'], ['other', 'Other notes', 'Coolant, hydraulic fluid, wipers...']];
 const specLabel = (k) => (SPEC_FIELDS.find((f) => f[0] === k) || [k, k])[1];
@@ -564,6 +670,17 @@ function vAdd(step) {
     return `<div class="screen">${topBar('Add machine', S.settings.onboarded ? '#/' : '#/welcome/4')}${steps(4, 1)}
       <h2 class="headline">What kind of machine?</h2>
       ${Object.entries(groups).map(([g, list]) => `<div class="grouplabel">${esc(g)}</div><div class="catgrid">${list.map(([k, c]) => `<button class="cat ${draft.cat === k ? 'on' : ''}" data-act="pick-cat" data-cat="${k}">${art(k, 44)}<span>${esc(c.label)}</span></button>`).join('')}</div>`).join('')}
+    </div>`;
+  }
+  if (step === 2 && draft.cat === 'cat') {
+    return `<div class="screen">${topBar('Add a cat', '#/add/1')}${steps(4, 2)}
+      <h2 class="headline">Who’s this?</h2>
+      <p class="note">Same reminders, fewer spark plugs.</p>
+      ${field('Name', inp('name', draft.name, 'e.g. Mr. Whiskers'))}
+      <div class="two">${field('Breed', inp('make', draft.make, 'e.g. Barn cat'))}${field('Color', inp('model', draft.model, 'e.g. Orange'))}</div>
+      ${field('Born (year)', inp('year', draft.year, 'Year', 'number', 'inputmode="numeric"'))}
+      <div class="spacer"></div>
+      <div class="actions-bottom"><button class="btn primary" data-act="add-next-2">Continue</button></div>
     </div>`;
   }
   if (step === 2) {
@@ -593,24 +710,24 @@ function vAdd(step) {
   }
   const c = CATS[draft.cat] || CATS.other;
   const unit = draft.unit;
-  return `<div class="screen">${topBar('Add machine', '#/add/3')}${steps(4, 4)}
-    <div class="photo-hero" style="height:200px" id="draftPhoto">${art(draft.cat, 120)}${draft.photoId ? `<img data-fid="${draft.photoId}" alt="" hidden>` : ''}</div>
+  return `<div class="screen">${topBar(draft.cat === 'cat' ? 'Add a cat' : 'Add machine', draft.cat === 'cat' ? '#/add/2' : '#/add/3')}${steps(4, 4)}
+    <div class="photo-hero" style="height:200px" id="draftPhoto">${art(draft.cat, 120)}${photoTag(draft.photoId)}</div>
     <label class="btn secondary" style="cursor:pointer">${icon('camera', 18)}${draft.photoId ? 'Change photo' : 'Add a photo (optional)'}<input type="file" accept="image/*" hidden data-change="draft-photo"></label>
     <div class="card">
       <div class="kv"><span>Name</span><b>${esc(draft.name)}</b></div>
       <div class="kv"><span>Type</span><span>${esc(c.label)}</span></div>
       ${draft.make || draft.model ? `<div class="kv"><span>Make & model</span><span>${esc([draft.year, draft.make, draft.model].filter(Boolean).join(' '))}</span></div>` : ''}
       ${draft.serial ? `<div class="kv"><span>${['car', 'truck', 'motorcycle'].includes(draft.cat) ? 'VIN' : 'Serial'}</span><span>${esc(draft.serial)}</span></div>` : ''}
-      <div class="kv"><span>${unit === 'hrs' ? 'Hours' : unit === 'none' ? 'Tracking' : 'Odometer'}</span><span>${unit === 'none' ? 'By date' : fmtN(num(draft.reading) || 0, UNIT_LABEL[unit])}</span></div>
+      ${draft.cat === 'cat' ? '' : `<div class="kv"><span>${unit === 'hrs' ? 'Hours' : unit === 'none' ? 'Tracking' : 'Odometer'}</span><span>${unit === 'none' ? 'By date' : fmtN(num(draft.reading) || 0, UNIT_LABEL[unit])}</span></div>`}
     </div>
     <div class="spacer"></div>
-    <div class="actions-bottom"><button class="btn primary" data-act="add-save">Add machine</button><button class="btn text" data-act="go" data-to="#/add/2">Edit details</button></div>
+    <div class="actions-bottom"><button class="btn primary" data-act="add-save">${draft.cat === 'cat' ? 'Add to the garage' : 'Add machine'}</button><button class="btn text" data-act="go" data-to="#/add/2">Edit details</button></div>
   </div>`;
 }
 function vAdded(id) {
   const m = M(id);
   return `<div class="screen">${topBar('', '#/m/' + id)}
-    <div class="center"><div class="success">${icon('check', 44)}</div><h1 class="big-title">Machine added</h1><p class="note">${esc(m.name)} is in your garage.</p></div>
+    <div class="center"><div class="success">${icon(m.cat === 'cat' ? 'cat' : 'check', 44)}</div><h1 class="big-title">${m.cat === 'cat' ? 'Cat added' : 'Machine added'}</h1><p class="note">${m.cat === 'cat' ? `${esc(m.name)} is now officially garage equipment. Low mileage, high maintenance.` : `${esc(m.name)} is in your garage.`}</p></div>
     <div class="card row"><div class="lrow" style="padding:0;background:none"><div class="ibox">${icon('wrench', 18)}</div><div class="grow"><div class="t">Set up its maintenance?</div><div class="d">We'll suggest a starting schedule for a ${esc((CATS[m.cat] || CATS.other).label.toLowerCase())}.</div></div></div></div>
     <div class="actions-bottom"><button class="btn primary" data-act="go" data-to="#/suggest/${id}">See suggested maintenance</button><button class="btn text" data-act="go" data-to="#/m/${id}">Later</button></div>
   </div>`;
@@ -625,8 +742,9 @@ function vSuggest(id) {
     <p class="note">Based on a typical ${esc((CATS[m.cat] || CATS.other).label.toLowerCase())}. Turn off anything you don't need. You can edit every interval later to match your owner's manual.</p>
     <div class="list">${tps.map((tp) => { const tmp = itemFromTemplate(m, tp); return `<button class="trow" data-act="sug-toggle" data-key="${tp.key}"><div class="ibox" style="width:36px;height:36px;border-radius:50%;background:var(--btn);display:grid;place-items:center">${icon(tp.icon, 18)}</div><div class="grow"><div class="t">${esc(tp.title)}</div><div class="d">${esc(intervalText(tmp, m))}</div></div><span class="switch ${suggestSel.on[tp.key] ? 'on' : ''}"></span></button>`; }).join('')}</div>
     <div class="card dark stack"><div style="font-weight:600">When was this stuff last done?</div>
-      <div class="seg"><button class="${suggestSel.last === 'now' ? 'on' : ''}" data-act="sug-last" data-v="now">Just now / recently</button><button class="${suggestSel.last === 'unknown' ? 'on' : ''}" data-act="sug-last" data-v="unknown">Not sure</button></div>
-      <p class="note" style="margin:0">${suggestSel.last === 'now' ? 'Reminders count from today.' : 'Everything starts as due so you can log what you do and reset it.'}</p></div>
+      <div class="seg"><button class="${suggestSel.last === 'now' ? 'on' : ''}" data-act="sug-last" data-v="now">Recently</button><button class="${suggestSel.last === 'date' ? 'on' : ''}" data-act="sug-last" data-v="date">Pick a date</button><button class="${suggestSel.last === 'unknown' ? 'on' : ''}" data-act="sug-last" data-v="unknown">Not sure</button></div>
+      ${suggestSel.last === 'date' ? `<div class="${hasMeter(m) ? 'two' : ''}">${field('Date', inp('sg_date', suggestSel.date || addMonths(todayISO(), -3), '', 'date'))}${hasMeter(m) ? field(`At (${UNIT_LABEL[m.unit]}, optional)`, inp('sg_r', suggestSel.reading || '', 'Best guess', 'number', 'inputmode="decimal"')) : ''}</div>` : ''}
+      <p class="note" style="margin:0">${suggestSel.last === 'now' ? 'Reminders count from today.' : suggestSel.last === 'date' ? 'Everything counts from that date. You can fine-tune each one later.' : 'Everything starts as due so you can log what you do and reset it.'}</p></div>
     <div class="actions-bottom"><button class="btn primary" data-act="sug-save" data-id="${id}">Use this schedule</button><button class="btn text" data-act="go" data-to="#/m/${id}">Skip for now</button></div>
   </div>`;
 }
@@ -644,7 +762,7 @@ function vAddMaint(id) {
   return `<div class="screen">${topBar('Add maintenance', '#/m/' + id)}
     <p class="note">Pick what to track on ${esc(m.name)}. Turn on anything you want to add.</p>
     <div class="list">
-      ${mine.map((i) => `<button class="trow" data-act="item-toggle" data-id="${i.id}"><div class="grow"><div class="t">${esc(i.title)}</div><div class="d">${esc(intervalText(i, m))}</div></div><span class="switch ${i.enabled !== false ? 'on' : ''}"></span></button>`).join('')}
+      ${mine.map((i) => `<div class="trow"><button class="grow" style="text-align:left" data-act="sched" data-id="${i.id}"><div class="t">${esc(i.title)}</div><div class="d">${esc(intervalText(i, m))} · <u>edit</u></div></button><button data-act="item-toggle" data-id="${i.id}" aria-label="On or off"><span class="switch ${i.enabled !== false ? 'on' : ''}"></span></button></div>`).join('')}
       ${tps.filter((tp) => !mine.some((i) => i.key === tp.key)).map((tp) => { const tmp = itemFromTemplate(m, tp); return `<button class="trow" data-act="tpl-add" data-id="${id}" data-key="${tp.key}"><div class="grow"><div class="t">${esc(tp.title)}</div><div class="d">${esc(intervalText(tmp, m))}</div></div><span class="switch"></span></button>`; }).join('')}
     </div>
     <button class="dashed" data-act="go" data-to="#/custom/${id}">${icon('plus', 18)}Add custom</button>
@@ -677,7 +795,7 @@ function vReceipt(mid, rid) {
   const pid = r ? r.photoId : pendingReceipt.photoId;
   const o = (!r && pendingReceipt.ocr) || {};
   return `<div class="screen">${topBar(r ? 'Receipt' : 'Add receipt', '#/m/' + mid + '/warranty')}
-    <label class="viewfinder" style="cursor:pointer">${pid ? `<img data-fid="${pid}" alt="Receipt" hidden>` : `${icon('scan', 56)}<span>Tap to snap the receipt</span><span class="note">or pick a photo</span>`}<input type="file" accept="image/*" capture="environment" hidden data-change="receipt-photo"></label>
+    <label class="viewfinder" style="cursor:pointer">${pid ? photoTag(pid, 'ph contain') : `${icon('scan', 56)}<span>Tap to snap the receipt</span><span class="note">or pick a photo</span>`}<input type="file" accept="image/*" capture="environment" hidden data-change="receipt-photo"></label>
     ${pid && !r ? `<button class="btn secondary" data-act="ocr" ${window.Tesseract === undefined ? '' : ''}>${icon('search', 18)}Read the receipt for me</button><div id="ocrmsg" class="note"></div>` : ''}
     ${field('Store / shop', inp('r_vendor', r?.vendor ?? o.vendor, 'e.g. Tractor Supply'))}
     <div class="two">${field('Date', inp('r_date', r?.date || o.date || todayISO(), '', 'date'))}${field('Total', inp('r_total', r?.total ?? o.total, '$0.00', 'text', 'inputmode="decimal"'))}</div>
@@ -749,7 +867,8 @@ function vSchedule() {
   });
   const sec = (t, arr) => arr.length ? `<div class="sec-title">${t}</div><div class="list">${arr.map((x) => mrow(x.it, x.st)).join('')}</div>` : '';
   return `<div class="screen has-nav">
-    <div class="hdr"><div class="h-title">Schedule</div><button class="rbtn" data-act="ics-all" aria-label="Add all to calendar">${icon('calendar', 18)}</button></div>
+    <div class="hdr sticky"><div class="h-title">Schedule</div><button class="rbtn" data-act="ics-all" aria-label="Add all to calendar">${icon('calendar', 18)}</button></div>
+    ${backupRow() ? `<div class="sec-title">Your data</div><div class="list">${backupRow()}</div>` : ''}
     ${r.length ? sec('Overdue', g.over) + sec('This week', g.week) + sec('This month', g.month) + sec('Later', g.later) + sec('Snoozed', g.snoozed) : empty('calendar', 'Nothing scheduled', 'Add a machine and its maintenance shows up here.', `<button class="btn primary" style="width:auto;padding:0 24px" data-act="go" data-to="#/add">Add machine</button>`)}
   </div>${nav('schedule')}`;
 }
@@ -764,7 +883,7 @@ function vProfile() {
   const archived = S.machines.filter((m) => m.archived).length;
   const nperm = ('Notification' in window) ? Notification.permission : 'unsupported';
   return `<div class="screen has-nav">
-    <div class="hdr"><div class="h-title">Profile</div></div>
+    <div class="hdr sticky"><div class="h-title">Profile</div></div>
     <div class="card"><div class="row between"><div><div class="muted" style="font-size:12px">Spent in ${yr}</div><div class="bebas" style="font-size:38px">${money(total) || '$0'}</div></div><div class="muted" style="text-align:right;font-size:13px">${plural(ms.length, 'machine')}<br>${plural(S.logs.filter((l) => !l.skipped).length, 'service')} logged</div></div>
       ${spendBy.length ? `<div class="stack" style="margin-top:10px">${spendBy.map((x) => `<div><div class="row between" style="font-size:13px"><span>${esc(x.m.name)}</span><span class="muted">${money(x.v)}</span></div><div class="bar" style="margin-top:4px;background:#222"><i style="width:${Math.round(x.v / max * 100)}%;background:#fff"></i></div></div>`).join('')}</div>` : ''}</div>
     <div class="sec-title">Settings</div>
@@ -774,16 +893,20 @@ function vProfile() {
       <button class="lrow" data-act="lead-days"><div class="ibox">${icon('clock', 18)}</div><div class="grow"><div class="t">"Due soon" warning</div><div class="d">${S.settings.leadDays} days ahead</div></div></button>
       <button class="lrow" data-act="notify-on"><div class="ibox">${icon('bell', 18)}</div><div class="grow"><div class="t">Reminders</div><div class="d">${nperm === 'granted' ? 'On · shows when you open the app' : nperm === 'denied' ? 'Blocked in browser settings' : nperm === 'unsupported' ? 'Add to Home Screen to enable' : 'Off · tap to turn on'}</div></div></button>
       <button class="lrow" data-act="ics-all"><div class="ibox">${icon('calendar', 18)}</div><div class="grow"><div class="t">Add schedule to calendar</div><div class="d">Downloads a calendar file with every due date</div></div></button>
+      <button class="lrow" data-act="go" data-to="#/install"><div class="ibox">${icon('squareplus', 18)}</div><div class="grow"><div class="t">Add to Home Screen</div><div class="d">${isStandalone() ? 'Done. You’re using the app version' : 'Step-by-step for iPhone and Android'}</div></div></button>
     </div>
     <div class="sec-title">Your data</div>
     <div class="group">
-      <button class="lrow" data-act="backup"><div class="ibox">${icon('download', 18)}</div><div class="grow"><div class="t">Back up everything</div><div class="d">${S.settings.lastBackup ? 'Last backup ' + fmtDate(S.settings.lastBackup, true) : 'Never backed up · saves a file with photos included'}</div></div></button>
+      <button class="lrow" data-act="backup"><div class="ibox">${icon('save', 18)}</div><div class="grow"><div class="t">Back up everything</div><div class="d">${S.settings.lastBackup ? 'Last backup ' + fmtDate(S.settings.lastBackup, true) : 'Never backed up · saves a file with photos included'}</div></div></button>
+      <button class="lrow" data-act="backup-snooze"><div class="ibox">${icon('bell', 18)}</div><div class="grow"><div class="t">Backup reminder</div><div class="d">${esc((BACKUP_OPTS.find((o) => o[0] === S.settings.backupEvery) || [0, 'Off'])[1])}${backupStatus() && S.settings.backupEvery ? ' · next ' + fmtDate(backupStatus().due) : ''}</div></div><span class="pill-tag">Change</span></button>
       <label class="lrow" style="cursor:pointer"><div class="ibox">${icon('upload', 18)}</div><div class="grow"><div class="t">Restore from backup</div><div class="d">Replaces what's on this phone</div></div><input type="file" accept=".json,application/json" hidden data-change="restore"></label>
-      <button class="lrow" data-act="csv"><div class="ibox">${icon('receipt', 18)}</div><div class="grow"><div class="t">Export history (CSV)</div><div class="d">Open in Excel or Google Sheets</div></div></button>
+      <button class="lrow" data-act="go" data-to="#/import"><div class="ibox">${icon('fileup', 18)}</div><div class="grow"><div class="t">Import from another app</div><div class="d">VMT, Fuelly, Drivvo, a spreadsheet… any CSV</div></div></button>
+      <button class="lrow" data-act="csv"><div class="ibox">${icon('sheet', 18)}</div><div class="grow"><div class="t">Export history (CSV)</div><div class="d">Open in Excel or Google Sheets</div></div></button>
       ${archived ? `<button class="lrow" data-act="go" data-to="#/archived"><div class="ibox">${icon('storage', 18)}</div><div class="grow"><div class="t">Archived machines</div><div class="d">${plural(archived, 'machine')}</div></div></button>` : ''}
     </div>
     <p class="note" style="margin-top:8px">Data stays on this device in this browser. Back up now and then, especially before switching phones. Maintenance intervals are general starting points, so check your owner's manuals.</p>
     <button class="btn text" data-act="reset-all" style="color:#ff6b6b">Erase all data</button>
+    <a class="credit" href="https://masen.site" target="_blank" rel="noopener">Built in a garage by a design student who should’ve been studying · <b>masen.site</b></a>
   </div>${nav('profile')}`;
 }
 function vArchived() {
@@ -793,13 +916,175 @@ function vArchived() {
   </div>`;
 }
 
+/* ======================= import (VMT, Fuelly, Drivvo, spreadsheets…) ======================= */
+let imp = null;
+const IMP_FIELDS = [
+  ['date', 'Date', /date|when|day/i],
+  ['title', 'What was done', /service|description|maint|task|work|performed|item|title|type|category|reason/i],
+  ['reading', 'Odometer / mileage', /odometer|odo\b|mileage|miles|\bkm\b|kilomet|reading/i],
+  ['hours', 'Engine hours', /hour|hrs|engine time/i],
+  ['cost', 'Cost', /total|cost|price|amount|paid|spent|\$/i],
+  ['cost2', 'Plus (e.g. labor)', /labou?r|parts/i],
+  ['shop', 'Shop / where', /shop|vendor|location|store|dealer|provider|garage|place|where|station/i],
+  ['notes', 'Notes', /note|comment|remark|detail|memo/i],
+  ['vehicle', 'Vehicle / machine', /vehicle|car|asset|machine|equipment|nickname|^name$|unit/i],
+  ['gallons', 'Fuel amount', /gallon|volume|litre|liter|qty|quantity|fuel amount/i],
+];
+function parseCSV(text) {
+  text = text.replace(/^﻿/, '');
+  const first = text.split(/\r?\n/).slice(0, 8).join('\n');
+  const delim = [',', ';', '\t'].map((d) => [d, first.split(d).length]).sort((a, b) => b[1] - a[1])[0][0];
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) { if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += ch; }
+    else if (ch === '"') q = true;
+    else if (ch === delim) { row.push(cell.trim()); cell = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; row.push(cell.trim()); rows.push(row); row = []; cell = ''; }
+    else cell += ch;
+  }
+  if (cell || row.length) { row.push(cell.trim()); rows.push(row); }
+  return rows.filter((r) => r.some((c) => c !== ''));
+}
+function parseAnyDate(v) {
+  v = String(v || '').trim(); if (!v) return null;
+  let m;
+  if ((m = v.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/))) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  if ((m = v.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})/))) { let y = +m[3]; if (y < 100) y += 2000; let a = +m[1], b = +m[2]; if (a > 12) [a, b] = [b, a]; return `${y}-${String(a).padStart(2, '0')}-${String(b).padStart(2, '0')}`; }
+  if (/^\d{5}$/.test(v)) { const d = new Date(Date.UTC(1899, 11, 30) + +v * 864e5); return d.toISOString().slice(0, 10); }
+  const t = Date.parse(v); return isNaN(t) ? null : iso(new Date(t));
+}
+function guessMapping(header) {
+  const map = {}; const used = new Set();
+  IMP_FIELDS.forEach(([k, , re]) => {
+    let idx = header.findIndex((h, i) => !used.has(i) && re.test(h) && !(k === 'cost' && /labou?r|parts/i.test(h) && header.some((x) => /total/i.test(x))));
+    if (k === 'cost') { const ti = header.findIndex((h, i) => !used.has(i) && /total/i.test(h)); if (ti >= 0) idx = ti; }
+    if (k === 'title') { const si = header.findIndex((h, i) => !used.has(i) && /service|description|task|work|performed/i.test(h)); if (si >= 0) idx = si; }
+    if (idx >= 0) { map[k] = idx; used.add(idx); }
+  });
+  return map;
+}
+function loadImport(text, name) {
+  const rows = parseCSV(text);
+  if (!rows.length) throw new Error('empty');
+  let best = 0, bestScore = -1;
+  rows.slice(0, 20).forEach((r, i) => { const sc = r.filter((c) => IMP_FIELDS.some(([, , re]) => re.test(c)) && c.length < 40).length; if (sc > bestScore) { bestScore = sc; best = i; } });
+  const header = rows[best].map((h, i) => h || `Column ${i + 1}`);
+  const data = rows.slice(best + 1).filter((r) => r.filter(Boolean).length >= 2);
+  imp = { name, header, data, map: guessMapping(header), target: S.machines.find((m) => !m.archived)?.id || 'new', newName: '', newCat: 'car', vmap: {}, suggest: true };
+}
+function impRecords() {
+  if (!imp) return [];
+  const g = (r, k) => (imp.map[k] != null && imp.map[k] !== '' ? r[imp.map[k]] : '');
+  return imp.data.map((r) => {
+    const gal = num(g(r, 'gallons'));
+    const title = g(r, 'title');
+    const cost = (num(g(r, 'cost')) || 0) + (num(g(r, 'cost2')) || 0);
+    return { date: parseAnyDate(g(r, 'date')), title, reading: num(g(r, 'reading')), hours: num(g(r, 'hours')), cost: cost || null, shop: g(r, 'shop'), notes: g(r, 'notes'), vehicle: g(r, 'vehicle') || '', gallons: gal, fuel: !!gal && (!title || /fuel|gas|fill|diesel|petrol/i.test(title)) };
+  }).filter((x) => x.date && (x.title || x.fuel));
+}
+function vImport() {
+  const ms = S.machines.filter((m) => !m.archived);
+  if (!imp) return `<div class="screen">${topBar('Import', '#/profile')}
+    <h2 class="headline">Bring your history over</h2>
+    <p class="note">Works with a CSV export from VMT (Vehicle Maintenance Tracker), Fuelly, Drivvo, Simply Auto, or your own spreadsheet. We figure out which column is which, and you can fix anything before it saves.</p>
+    <div class="istep"><div class="n">1</div><div class="grow"><div class="t">Export from the old app</div><div class="d">Look for Export, Share or Backup and pick CSV. Save it to Files (or email it to yourself and save the attachment).</div></div></div>
+    <div class="istep"><div class="n">2</div><div class="grow"><div class="t">Pick the file here</div><div class="d">Nothing is uploaded anywhere. It’s read right on this phone.</div></div></div>
+    <label class="btn primary" style="cursor:pointer">${icon('fileup', 18)}Choose CSV file<input type="file" accept=".csv,text/csv,text/plain,.txt,.tsv" hidden data-change="import-file"></label>
+    <p class="note">Got a different format (Excel, PDF)? Open it in Google Sheets or Numbers and export as CSV first.</p>
+  </div>`;
+  const recs = impRecords();
+  const opt = (k) => `<select class="inp" data-change="imp-map" data-k="${k}"><option value="">— none —</option>${imp.header.map((h, i) => `<option value="${i}" ${imp.map[k] === i ? 'selected' : ''}>${esc(h)}</option>`).join('')}</select>`;
+  const vehicles = imp.map.vehicle != null && imp.map.vehicle !== '' ? [...new Set(recs.map((r) => r.vehicle).filter(Boolean))] : [];
+  const mOpts = (sel) => `${ms.map((m) => `<option value="${m.id}" ${sel === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}<option value="new" ${sel === 'new' ? 'selected' : ''}>+ New machine</option><option value="skip" ${sel === 'skip' ? 'selected' : ''}>Skip these</option>`;
+  const catSel = (k, cur) => `<select class="inp" data-change="imp-cat" data-k="${esc(k)}">${Object.entries(CATS).filter(([c]) => c !== 'cat').map(([c, v]) => `<option value="${c}" ${cur === c ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}</select>`;
+  vehicles.forEach((v) => { if (!imp.vmap[v]) { const hit = ms.find((m) => m.name.toLowerCase() === v.toLowerCase() || [m.year, m.make, m.model].filter(Boolean).join(' ').toLowerCase() === v.toLowerCase()); imp.vmap[v] = { to: hit ? hit.id : 'new', cat: guessCat(v) }; } });
+  const nFuel = recs.filter((r) => r.fuel).length;
+  return `<div class="screen">${topBar('Import', '#/profile')}
+    <div class="card dark"><div class="row between"><b style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(imp.name)}</b><button class="smallbtn" data-act="imp-reset">Change file</button></div><div class="note" style="margin-top:4px">${plural(recs.length - nFuel, 'service')}${nFuel ? ` and ${plural(nFuel, 'fuel-up')}` : ''} ready to import</div></div>
+    <div class="sec-title">Match the columns</div>
+    <div class="stack">${IMP_FIELDS.map(([k, l]) => `<div class="maprow"><span>${l}</span>${opt(k)}</div>`).join('')}</div>
+    <div class="sec-title">Preview</div>
+    <div class="tbl"><table><tr><th>Date</th><th>What</th><th>Reading</th><th>Cost</th>${vehicles.length ? '<th>Vehicle</th>' : ''}</tr>${recs.slice(0, 6).map((r) => `<tr><td>${esc(fmtDate(r.date, true))}</td><td>${esc(r.fuel ? `Fuel-up ${r.gallons}` : r.title.slice(0, 26))}</td><td>${r.reading != null ? fmtN(r.reading) : r.hours != null ? fmtN(r.hours, 'hrs') : ''}</td><td>${money(r.cost)}</td>${vehicles.length ? `<td>${esc(r.vehicle)}</td>` : ''}</tr>`).join('')}</table></div>
+    ${recs.length ? '' : `<p class="note" style="color:#ff8a8a">No rows with a date and a description yet. Check the Date and What was done columns above.</p>`}
+    <div class="sec-title">Which machine?</div>
+    ${vehicles.length ? vehicles.map((v) => `<div class="card stack"><b>${esc(v)}</b><select class="inp" data-change="imp-vto" data-k="${esc(v)}">${mOpts(imp.vmap[v].to)}</select>${imp.vmap[v].to === 'new' ? catSel(v, imp.vmap[v].cat) : ''}</div>`).join('')
+      : `<div class="card stack"><select class="inp" data-change="imp-target">${mOpts(imp.target)}</select>${imp.target === 'new' ? `${inp('imp_name', imp.newName, 'Name, e.g. 2019 Ford F-150')}${catSel('', imp.newCat)}` : ''}</div>`}
+    <button class="trow" data-act="imp-suggest"><div class="grow"><div class="t">Add the suggested schedule to new machines</div><div class="d">Imported services then set when each one was last done</div></div><span class="switch ${imp.suggest ? 'on' : ''}"></span></button>
+    <div class="actions-bottom"><button class="btn primary" data-act="imp-run" ${recs.length ? '' : 'disabled'}>Import ${plural(recs.length, 'record')}</button></div>
+  </div>`;
+}
+function guessCat(v) {
+  return /zero|\bztr?\d*|z\d{3}/i.test(v) ? 'zeroturn' : /tractor|kubota|deere \d|mahindra|kioti/i.test(v) ? 'tractor' : /mower|cub cadet|toro|husqvarna|craftsman|ariens|scag|exmark|bad boy/i.test(v) ? 'riding'
+    : /e-?bike|rad ?power|aventon|lectric|trek|specialized/i.test(v) ? 'ebike' : /sur-?ron|talaria|e-?ride|stark varg/i.test(v) ? 'edirt' : /generator|honda eu|champion|predator/i.test(v) ? 'generator'
+    : /harley|motorcycle|yamaha r|kawasaki|ducati|ktm|suzuki gsx/i.test(v) ? 'motorcycle' : /polaris|can-?am|razor|rzr|atv|utv|gator/i.test(v) ? 'atv' : /trailer/i.test(v) ? 'trailer' : /boat|mercury|evinrude|pontoon/i.test(v) ? 'boat'
+    : /truck|f-?\d50|silverado|ram \d|sierra|tundra|tacoma|colorado|frontier|ridgeline|ranger|gladiator/i.test(v) ? 'truck' : 'car';
+}
+const MATCH_RULES = [
+  [/trans(mission)?/i, ['trans']], [/diff/i, ['diff']], [/pump oil/i, ['pumpoil']], [/fork/i, ['forks']], [/gear (oil|lube)/i, ['gearlube']],
+  [/oil/i, ['oil']], [/rotat/i, ['rotate']], [/cabin/i, ['cabin']], [/air ?filter|engine air/i, ['airfilter']], [/fuel filter/i, ['fuelfilter']],
+  [/brake fluid|bleed/i, ['brakefluid', 'bleed']], [/brake|pads?\b|rotor/i, ['brakes', 'brakepads']], [/wiper/i, ['wipers']], [/batter/i, ['battery']],
+  [/coolant|antifreeze|radiator/i, ['coolant']], [/spark|plugs?\b/i, ['plugs', 'plug']], [/blade/i, ['blades']], [/belt/i, ['belt', 'cvt']],
+  [/grease|lube/i, ['grease', 'chainlube']], [/chain/i, ['chain', 'chainlube']], [/tire|tyre/i, ['tires']], [/inspect/i, ['inspection']],
+];
+function matchItems(mid, title) {
+  const items = S.items.filter((i) => i.machineId === mid);
+  const t = (title || '').toLowerCase();
+  const out = new Set();
+  items.forEach((i) => { if (t && (t === i.title.toLowerCase() || t.includes(i.title.toLowerCase()))) out.add(i.id); });
+  t.split(/[,;+&/]| and /).forEach((part) => {
+    const rule = MATCH_RULES.find(([re]) => re.test(part)); if (!rule) return;
+    const hit = items.find((i) => rule[1].includes(i.key)); if (hit) out.add(hit.id);
+  });
+  return [...out];
+}
+function runImport() {
+  const recs = impRecords(); if (!recs.length) return;
+  const snap = snapshot();
+  const created = {};
+  const newMachine = (name, cat, rs) => {
+    const c = CATS[cat] || CATS.car;
+    const hrs = rs.some((r) => r.hours != null) && !rs.some((r) => r.reading != null);
+    const unit = hrs ? 'hrs' : c.unit === 'mi' ? S.settings.distUnit : c.unit === 'hrs' && rs.some((r) => r.reading != null) ? 'hrs' : c.unit;
+    const ym = String(name).match(/^((?:19|20)\d\d)\s+(\S+)\s*(.*)$/);
+    const m = { id: uid(), name: name || c.label, cat, make: ym ? ym[2] : '', model: ym ? ym[3] : '', year: ym ? ym[1] : '', unit, reading: 0, readingDate: '', photoId: null, severe: false, archived: false, specs: {}, created: todayISO() };
+    S.machines.push(m);
+    if (imp.suggest) templatesFor(m).forEach((tp) => { const it = itemFromTemplate(m, tp); it.unknown = true; it.lastDate = addMonths(todayISO(), -(it.every.months || 120)); it.lastReading = -1e9; it.first = null; S.items.push(it); });
+    return m;
+  };
+  const groups = {};
+  recs.forEach((r) => {
+    let to = imp.map.vehicle != null && imp.map.vehicle !== '' && r.vehicle ? imp.vmap[r.vehicle]?.to : imp.target;
+    if (!to || to === 'skip') return;
+    const key = to === 'new' ? 'new:' + (r.vehicle || '') : to;
+    (groups[key] = groups[key] || []).push(r);
+  });
+  let nLogs = 0, nFuel = 0;
+  Object.entries(groups).forEach(([key, rs]) => {
+    let m;
+    if (key.startsWith('new:')) { const v = key.slice(4); m = newMachine(v || val('imp_name') || imp.newName || 'Imported vehicle', v ? imp.vmap[v].cat : imp.newCat, rs); created[m.id] = true; }
+    else m = M(key);
+    if (!m) return;
+    rs.sort((a, b) => a.date.localeCompare(b.date)).forEach((r) => {
+      const rd = m.unit === 'hrs' ? (r.hours ?? r.reading) : r.reading;
+      if (r.fuel) { S.fuel.push({ id: uid(), machineId: m.id, date: r.date, reading: rd, gallons: r.gallons, total: r.cost, full: true }); if (rd != null) setReading(m, rd, r.date); nFuel++; return; }
+      doLog(matchItems(m.id, r.title), { machineId: m.id, title: r.title, date: r.date, reading: hasMeter(m) ? rd : null, cost: r.cost, shop: r.shop, notes: r.notes });
+      nLogs++;
+    });
+    if (S.fuel.some((f) => f.machineId === m.id)) recalcMPG(m.id);
+    if (created[m.id]) { S.items.filter((i) => i.machineId === m.id && i.lastReading === -1e9).forEach((i) => { i.lastReading = (m.reading || 0) - (i.every.u || 0); }); if (!m.readingDate) m.readingDate = todayISO(); }
+  });
+  imp = null; save(); go('#/');
+  toast(`Imported ${plural(nLogs, 'service')}${nFuel ? ` + ${plural(nFuel, 'fuel-up')}` : ''}`, () => { S = snap; save(); render(); });
+}
+
 /* ======================= report (printable) ======================= */
 function vReport(id) {
   const m = M(id);
   const logs = S.logs.filter((l) => l.machineId === id && !l.skipped).sort((a, b) => a.date.localeCompare(b.date));
   const total = logs.reduce((s, l) => s + (l.cost || 0), 0);
   return `<div class="screen">
-    <div class="hdr no-print"><div class="left">${backBtn('#/m/' + id + '/history')}<div class="h-title sm">Service report</div></div><button class="rbtn" data-act="print" aria-label="Print">${icon('print', 18)}</button></div>
+    <div class="hdr sticky no-print"><div class="left">${backBtn('#/m/' + id + '/history')}<div class="h-title sm">Service report</div></div><button class="rbtn" data-act="print" aria-label="Print">${icon('print', 18)}</button></div>
     <div><h1 class="big-title">${esc(m.name)}</h1><p class="note">${esc([m.year, m.make, m.model].filter(Boolean).join(' '))}${m.serial ? ' · ' + esc(m.serial) : ''}${hasMeter(m) ? ' · ' + fmtN(m.reading, UNIT_LABEL[m.unit]) : ''} · Report made ${fmtDate(todayISO(), true)}</p></div>
     <div class="card"><div class="kv"><span>Services logged</span><b>${logs.length}</b></div><div class="kv"><span>Total spent</span><b>${money(total) || '$0'}</b></div></div>
     ${logs.length ? `<div class="group">${logs.map((l) => `<div class="lrow"><div class="grow"><div class="t">${esc(l.title)}</div><div class="d">${fmtDate(l.date, true)}${l.reading != null ? ' · ' + fmtN(l.reading, UNIT_LABEL[m.unit]) : ''}${l.shop ? ' · ' + esc(l.shop) : ''}${l.notes ? ' · ' + esc(l.notes) : ''}</div></div><div class="v">${money(l.cost)}</div></div>`).join('')}</div>` : `<p class="note">No services logged yet.</p>`}
@@ -820,7 +1105,7 @@ function vRecalls(id) {
 function vEditMachine(id) {
   const m = M(id);
   return `<div class="screen">${topBar('Edit machine', '#/m/' + id)}
-    <div class="photo-hero" style="height:180px">${art(m.cat, 110)}${m.photoId ? `<img data-fid="${m.photoId}" alt="" hidden>` : ''}</div>
+    <div class="photo-hero" style="height:180px">${art(m.cat, 110)}${photoTag(m.photoId)}</div>
     <label class="btn secondary" style="cursor:pointer">${icon('camera', 18)}${m.photoId ? 'Change photo' : 'Add a photo'}<input type="file" accept="image/*" hidden data-change="machine-photo" data-id="${id}"></label>
     ${field('Nickname', inp('e_name', m.name, ''))}
     <div class="two">${field('Make', inp('e_make', m.make, 'Brand'))}${field('Model', inp('e_model', m.model, 'Model'))}</div>
@@ -859,9 +1144,9 @@ function openLog(itemId, logId) {
     ${!editing && others.length ? `<div class="stack tight"><span class="muted" style="font-size:12px">Did anything else at the same time?</span>${others.slice(0, 5).map((x) => `<button class="trow" style="min-height:48px" data-act="log-also" data-id="${x.it.id}"><span class="check" data-also="${x.it.id}"></span><div class="grow"><div class="t" style="font-size:15px">${esc(x.it.title)}</div><div class="d">${esc(x.st.text)}</div></div></button>`).join('')}</div>` : ''}
     <div class="two">${field('Cost (optional)', inp('l_cost', editing?.cost, '$0.00', 'text', 'inputmode="decimal"'))}${field('Done by', `<select class="inp" id="l_shop"><option value="">Me (DIY)</option>${[...new Set(S.logs.map((l) => l.shop).filter(Boolean))].map((s) => `<option ${editing?.shop === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}<option value="__new">A shop…</option></select>`)}</div>
     ${field('Notes (optional)', inp('l_notes', editing?.notes, 'e.g. Used Mobil 1 5W-30, filter FL-820S'))}
-    <label class="btn secondary" style="cursor:pointer;height:46px">${icon('camera', 18)}<span id="l_photoLabel">${editing && editing.receiptIds && editing.receiptIds.length ? 'Receipt attached · add another' : 'Attach receipt photo'}</span><input type="file" accept="image/*" capture="environment" hidden data-change="log-photo"></label>
-    <button class="btn primary" data-act="log-save" data-item="${it ? it.id : ''}" data-log="${editing ? editing.id : ''}">${editing ? 'Save changes' : 'Save'}</button>
-    ${editing ? `<button class="btn danger" data-act="log-del" data-id="${editing.id}">Delete entry</button>` : ''}`);
+    <label class="btn secondary" style="cursor:pointer;height:46px">${icon('camera', 18)}<span id="l_photoLabel">${editing && editing.receiptIds && editing.receiptIds.length ? 'Receipt attached · add another' : 'Attach receipt photo'}</span><input type="file" accept="image/*" hidden data-change="log-photo"></label>
+    ${editing ? `<button class="btn danger" data-act="log-del" data-id="${editing.id}">Delete entry</button>` : ''}
+    <div class="sheet-actions"><button class="btn primary" data-act="log-save" data-item="${it ? it.id : ''}" data-log="${editing ? editing.id : ''}">${editing ? 'Save changes' : 'Save'}</button></div>`);
   logPhotos = [];
 }
 let logPhotos = [];
@@ -873,7 +1158,7 @@ function openReading(mid) {
     <p class="note" style="margin:0">Last: ${fmtN(m.reading, UNIT_LABEL[m.unit])} on ${fmtDate(m.readingDate, true)}</p>
     <div class="numpad-display" id="np">${fmtN(m.reading, '')}</div>
     <div class="numpad">${['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', '⌫'].map((k) => `<button data-np="${k}">${k}</button>`).join('')}</div>
-    <button class="btn primary" data-act="reading-save" data-id="${mid}">Save</button>`, (s) => {
+    <div class="sheet-actions"><button class="btn primary" data-act="reading-save" data-id="${mid}">Save</button></div>`, (s) => {
     s.querySelectorAll('[data-np]').forEach((b) => b.addEventListener('click', () => {
       const k = b.dataset.np;
       if (k === '⌫') val = val.slice(0, -1); else if (!(k === '.' && val.includes('.')) && val.length < 9) val += k;
@@ -910,7 +1195,8 @@ function openItemMenu(id) {
   sheet(`${sheetHead(it.title)}<div class="group">
     <button class="lrow" data-act="log" data-id="${id}"><div class="ibox">${icon('check', 18)}</div><div class="grow"><div class="t">Log it</div></div></button>
     <button class="lrow" data-act="snooze" data-id="${id}"><div class="ibox">${icon('snooze', 18)}</div><div class="grow"><div class="t">Snooze or skip</div></div></button>
-    <button class="lrow" data-act="go-close" data-to="#/custom/${it.machineId}/${id}"><div class="ibox">${icon('edit', 18)}</div><div class="grow"><div class="t">Edit interval</div></div></button>
+    <button class="lrow" data-act="sched" data-id="${id}"><div class="ibox">${icon('history', 18)}</div><div class="grow"><div class="t">Change interval or last done</div></div></button>
+    <button class="lrow" data-act="go-close" data-to="#/custom/${it.machineId}/${id}"><div class="ibox">${icon('edit', 18)}</div><div class="grow"><div class="t">Rename or add notes</div></div></button>
     <button class="lrow" data-act="ics-item" data-id="${id}"><div class="ibox">${icon('calendar', 18)}</div><div class="grow"><div class="t">Add to calendar</div></div></button>
     <button class="lrow" data-act="go-close" data-to="#/note/${it.machineId}"><div class="ibox">${icon('note', 18)}</div><div class="grow"><div class="t">Add a note</div></div></button>
     <button class="lrow" data-act="item-off" data-id="${id}"><div class="ibox">${icon('x', 18)}</div><div class="grow"><div class="t">Stop tracking</div><div class="d">History is kept</div></div></button>
@@ -940,18 +1226,90 @@ function openOneOff(mid) {
     <div class="two">${field('Date', inp('o_date', todayISO(), '', 'date'))}${hasMeter(m) ? field(m.unit === 'hrs' ? 'Hours' : 'Odometer', inp('o_reading', Math.round((predictedReading(m) || 0) * 10) / 10, '', 'number')) : '<div></div>'}</div>
     <div class="two">${field('Cost', inp('o_cost', '', '$0.00', 'text', 'inputmode="decimal"'))}${field('Shop (optional)', inp('o_shop', '', 'DIY'))}</div>
     ${field('Notes', inp('o_notes', '', ''))}
-    <button class="btn primary" data-act="oneoff-save" data-id="${mid}">Save</button>`);
+    <div class="sheet-actions"><button class="btn primary" data-act="oneoff-save" data-id="${mid}">Save</button></div>`);
 }
 function prompt2(title, label, val, onSave, type = 'text') {
-  sheet(`${sheetHead(title)}${field(label, inp('p_val', val, '', type))}<button class="btn primary" id="p_save">Save</button>`, (s) => {
+  sheet(`${sheetHead(title)}${field(label, inp('p_val', val, '', type))}<div class="sheet-actions"><button class="btn primary" id="p_save">Save</button></div>`, (s) => {
     const i = $('#p_val', s); setTimeout(() => i.focus(), 250);
     $('#p_save', s).addEventListener('click', () => { onSave(i.value); closeSheet(); });
   });
 }
 function confirm2(title, msg, yes, onYes, danger = true) {
-  sheet(`${sheetHead(title)}<p class="note" style="margin:0">${esc(msg)}</p><button class="btn ${danger ? 'danger' : 'primary'}" id="c_yes">${esc(yes)}</button><button class="btn text" data-act="close-sheet">Cancel</button>`, (s) => {
+  sheet(`${sheetHead(title)}<p class="note" style="margin:0">${esc(msg)}</p><div class="sheet-actions"><button class="btn ${danger ? 'danger' : 'primary'}" id="c_yes">${esc(yes)}</button><button class="btn text" data-act="close-sheet">Cancel</button></div>`, (s) => {
     $('#c_yes', s).addEventListener('click', () => { closeSheet(); onYes(); });
   });
+}
+
+/* ---------- quick schedule editor (interval + last done) ---------- */
+function estReadingOn(m, date) {
+  if (!hasMeter(m)) return null;
+  const days = Math.max(0, daysBetween(date, m.readingDate || todayISO()));
+  const v = (m.reading || 0) - usageRate(m) * days;
+  return Math.max(0, m.unit === 'hrs' ? Math.round(v * 10) / 10 : Math.round(v / 10) * 10);
+}
+let schedUnknown = false;
+function openSched(id) {
+  const it = I(id), m = M(it.machineId), u = UNIT_LABEL[m.unit], meter = hasMeter(m);
+  schedUnknown = !!it.unknown && !lastLogFor(it.id);
+  const presetsU = m.unit === 'hrs' ? [10, 25, 50, 100, 200] : m.unit === 'km' ? [5000, 8000, 10000, 15000] : [3000, 5000, 7500, 10000];
+  const mo = (v) => (v === 12 ? '1 yr' : v === 24 ? '2 yr' : v + ' mo');
+  sheet(`${sheetHead('Schedule')}
+    <p class="note" style="margin:-8px 0 0">${esc(it.title)} · ${esc(m.name)}</p>
+    <div class="field"><span>Repeat every</span>
+      ${meter ? `<div class="two"><div class="row" style="gap:8px">${inp('s_u', it.every.u ?? '', 'none', 'number', 'inputmode="decimal"')}<span class="muted">${u}</span></div><div class="row" style="gap:8px">${inp('s_m', it.every.months ?? '', 'none', 'number', 'inputmode="numeric"')}<span class="muted">mo</span></div></div>
+        <div class="picks">${presetsU.map((v) => `<button class="pick" data-act="s-pick" data-f="s_u" data-v="${v}">${fmtN(v, u)}</button>`).join('')}</div>` : `<div class="row" style="gap:8px">${inp('s_m', it.every.months ?? '', 'e.g. 12', 'number', 'inputmode="numeric"')}<span class="muted">months</span></div>`}
+      <div class="picks">${[1, 3, 6, 12, 24].map((v) => `<button class="pick" data-act="s-pick" data-f="s_m" data-v="${v}">${mo(v)}</button>`).join('')}</div>
+      ${meter ? `<span class="faint" style="font-size:12px">Whichever comes first. Clear one to ignore it.</span>` : ''}
+    </div>
+    <div class="field"><span>Last done</span>
+      <div class="${meter ? 'two' : ''}">${inp('s_date', schedUnknown ? '' : it.lastDate, '', 'date')}${meter ? inp('s_r', schedUnknown ? '' : (it.lastReading ?? ''), 'at ' + (u || ''), 'number', 'inputmode="decimal"') : ''}</div>
+      <div class="picks">${[['Today', 0], ['1 mo ago', 1], ['3 mo ago', 3], ['6 mo ago', 6], ['1 yr ago', 12]].map(([l, n]) => `<button class="pick" data-act="s-ago" data-v="${n}">${l}</button>`).join('')}<button class="pick ${schedUnknown ? 'on' : ''}" data-act="s-unknown" id="s_unk">Not sure</button></div>
+      ${meter ? `<span class="faint" style="font-size:12px">Quick picks estimate the ${m.unit === 'hrs' ? 'hours' : 'mileage'} from how much you use it. Type the real number if you know it.</span>` : ''}
+    </div>
+    <div class="preview" id="s_prev"></div>
+    <div class="sheet-actions"><button class="btn primary" data-act="sched-save" data-id="${id}">Save</button></div>`, (sh) => {
+    sh.addEventListener('input', (e) => { if (e.target.id === 's_date' || e.target.id === 's_r') { schedUnknown = false; const k = $('#s_unk'); if (k) k.classList.remove('on'); } schedPreview(id); });
+    schedPreview(id);
+  });
+}
+function schedDraft(id) {
+  const it = I(id), m = M(it.machineId);
+  const uV = num(val('s_u')), mV = num(val('s_m'));
+  const d = val('s_date') || todayISO();
+  return { ...it, every: { u: hasMeter(m) ? uV || null : null, months: mV || null }, lastDate: d, lastReading: hasMeter(m) ? (num(val('s_r')) ?? estReadingOn(m, d)) : it.lastReading, unknown: false, snoozeUntil: null, first: lastLogFor(it.id) ? null : it.first };
+}
+function schedPreview(id) {
+  const box = $('#s_prev'); if (!box) return;
+  const d = schedDraft(id);
+  if (!d.every.u && !d.every.months) { box.innerHTML = 'Set at least one: a distance/hours or a number of months.'; return; }
+  if (schedUnknown) { box.innerHTML = '<b>Shows as due now</b> until you log it.'; return; }
+  const st = itemStatus(d);
+  box.innerHTML = `Next due: <b>${st.dueDate ? fmtDate(st.dueDate, true) : '—'}</b> · ${esc(st.text)}`;
+}
+
+/* ---------- backup reminder (works like a maintenance item) ---------- */
+function backupStatus() {
+  const every = S.settings.backupEvery;
+  if (!every || !S.machines.length) return null;
+  const base = S.settings.lastBackup ? addDays(S.settings.lastBackup, every) : addDays(S.settings.firstUse || todayISO(), 7);
+  const due = S.settings.backupSnooze && S.settings.backupSnooze > base ? S.settings.backupSnooze : base;
+  const d = daysBetween(todayISO(), due);
+  return { due, d, over: d <= 0 };
+}
+function backupRow() {
+  const b = backupStatus(); if (!b || !b.over) return '';
+  return `<div class="mrow urgent backup">
+    <div class="top"><span class="chip warn">${icon('save', 15)}Backup</span><div class="mname" style="text-align:left">Your data</div></div>
+    <div class="mid"><span class="desc">${S.settings.lastBackup ? `Last backup ${humanDays(daysBetween(S.settings.lastBackup, todayISO()))} ago` : 'Never backed up'}</span><span class="meta" style="color:#f3c4c4">${esc((BACKUP_OPTS.find((o) => o[0] === S.settings.backupEvery) || [0, ''])[1])}</span></div>
+    <div class="bigacts"><button class="logl" data-act="backup">Back up now</button><button class="rbtn lg" data-act="backup-snooze" aria-label="Snooze">${icon('snooze', 20)}</button></div>
+  </div>`;
+}
+const BACKUP_OPTS = [[14, 'Every 2 weeks'], [30, 'Every month'], [90, 'Every 3 months'], [0, 'Off']];
+function openBackupSnooze() {
+  sheet(`${sheetHead('Backup reminder')}<div class="group">
+    ${[[1, 'Tomorrow'], [7, 'In a week']].map(([d, l]) => `<button class="lrow" data-act="backup-snooze-set" data-days="${d}"><div class="ibox">${icon('snooze', 18)}</div><div class="grow"><div class="t">${l}</div></div></button>`).join('')}
+    ${BACKUP_OPTS.map(([d, l]) => `<button class="lrow" data-act="backup-every" data-v="${d}"><div class="ibox">${icon(d ? 'history' : 'x', 18)}</div><div class="grow"><div class="t">${d ? 'Remind me ' + l.toLowerCase() : 'Turn off backup reminders'}</div></div>${S.settings.backupEvery === d ? icon('check', 18) : ''}</button>`).join('')}
+  </div>`);
 }
 
 /* ======================= toast + undo ======================= */
@@ -978,7 +1336,7 @@ function doLog(itemIds, data) {
   const titles = itemIds.map((id) => I(id)?.title).filter(Boolean);
   const log = { id: uid(), machineId: m.id, itemIds, title: data.title || titles.join(' + '), date: data.date, reading: data.reading, cost: data.cost, shop: data.shop, notes: data.notes, receiptIds: data.receiptIds || [], skipped: !!data.skipped, checklist: data.checklist };
   S.logs.push(log);
-  itemIds.forEach((id) => { const it = I(id); if (!it) return; if (!it.lastDate || data.date >= it.lastDate) { it.unknown = false; it.lastDate = data.date; if (data.reading != null) it.lastReading = data.reading; else if (hasMeter(m)) it.lastReading = m.reading; } it.snoozeUntil = null; });
+  itemIds.forEach((id) => { const it = I(id); if (!it) return; if (!it.lastDate || (it.unknown && !data.skipped) || data.date >= it.lastDate) { it.unknown = false; it.lastDate = data.date; if (data.reading != null) it.lastReading = data.reading; else if (hasMeter(m)) it.lastReading = m.reading; } it.snoozeUntil = null; });
   if (data.reading != null) setReading(m, data.reading, data.date);
   (data.receiptIds || []).forEach((rid) => { const r = S.receipts.find((x) => x.id === rid); if (r) r.logId = log.id; });
   return log;
@@ -1002,13 +1360,53 @@ const ACT = {
   'close-sheet': () => closeSheet(),
   print: () => window.print(),
   'restore-start': () => { const i = document.createElement('input'); i.type = 'file'; i.accept = '.json,application/json'; i.onchange = () => restoreFile(i.files[0]); i.click(); },
+  'name-pick': (el) => { const i = $('#garageName'); if (i) { i.value = el.dataset.v; i.focus(); } document.querySelectorAll('.pick').forEach((p) => p.classList.toggle('on', p === el)); },
+  'onb-name': () => { const v = val('garageName'); if (!v) { $('#garageName').focus(); return toast('Give your garage a name'); } S.settings.garage = v; save(); go('#/welcome/5'); },
+  'install-tab': (el) => { installTab = el.dataset.v; render(); },
+  'install-now': async () => { if (!installEvt) return; installEvt.prompt(); try { await installEvt.userChoice; } catch (e) {} installEvt = null; render(); },
+  'install-dismiss': (el, e) => { e.stopPropagation(); S.settings.installDismissed = true; save(); render(); },
+  sched: (el, e) => { e && e.stopPropagation(); closeSheet(); openSched(el.dataset.id); },
+  's-pick': (el) => { const i = $('#' + el.dataset.f); if (i) { i.value = el.dataset.v; schedPreview(el.closest('.sheet').querySelector('[data-act=sched-save]').dataset.id); } },
+  's-ago': (el) => {
+    const id = $('[data-act=sched-save]').dataset.id, it = I(id), m = M(it.machineId);
+    const d = addMonths(todayISO(), -(+el.dataset.v)); $('#s_date').value = d;
+    if ($('#s_r')) $('#s_r').value = +el.dataset.v === 0 ? Math.round(predictedReading(m) * 10) / 10 : estReadingOn(m, d);
+    schedUnknown = false; $('#s_unk').classList.remove('on'); schedPreview(id);
+  },
+  's-unknown': (el) => { schedUnknown = !schedUnknown; el.classList.toggle('on', schedUnknown); if (schedUnknown) { $('#s_date').value = ''; if ($('#s_r')) $('#s_r').value = ''; } schedPreview($('[data-act=sched-save]').dataset.id); },
+  'sched-save': (el) => {
+    const it = I(el.dataset.id), m = M(it.machineId);
+    const d = schedDraft(it.id);
+    if (!d.every.u && !d.every.months) return toast('Set how often it repeats');
+    const snap = snapshot();
+    it.every = d.every; it.snoozeUntil = null;
+    if (schedUnknown) { it.unknown = true; it.lastDate = addMonths(todayISO(), -(d.every.months || 120)); if (d.every.u) it.lastReading = (m.reading || 0) - d.every.u; }
+    else { it.unknown = false; it.lastDate = d.lastDate; if (hasMeter(m)) it.lastReading = d.lastReading; }
+    if (lastLogFor(it.id)) it.first = null;
+    save(); closeSheet(); render(); toast('Schedule updated', () => { S = snap; save(); render(); });
+  },
+  'backup-snooze': () => openBackupSnooze(),
+  'imp-reset': () => { imp = null; render(); },
+  'imp-suggest': (el) => { imp.suggest = !imp.suggest; el.querySelector('.switch').classList.toggle('on', imp.suggest); },
+  'imp-run': () => runImport(),
+  'backup-snooze-set': (el) => { S.settings.backupSnooze = addDays(todayISO(), +el.dataset.days); save(); closeSheet(); render(); toast('Backup reminder snoozed'); },
+  'backup-every': (el) => { S.settings.backupEvery = +el.dataset.v; S.settings.backupSnooze = ''; save(); closeSheet(); render(); toast(+el.dataset.v ? 'Backup reminder updated' : 'Backup reminders off'); },
+  'backup-save': async () => {
+    const f = pendingBackup; if (!f) return closeSheet();
+    let shared = false;
+    if (navigator.canShare && navigator.share) {
+      try { if (navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], title: f.name }); shared = true; } }
+      catch (e) { if (e && e.name === 'AbortError') return; }
+    }
+    if (!shared) download(f.name, f);
+    S.settings.lastBackup = todayISO(); S.settings.backupSnooze = ''; save(); closeSheet(); render(); toast('Backup saved');
+  },
   'finish-onboard': async (el) => {
-    S.settings.garage = val('garageName') || S.settings.garage;
     S.settings.onboarded = true; save();
     if (el.dataset.notify && 'Notification' in window) { try { const p = await Notification.requestPermission(); S.settings.notify = p === 'granted'; save(); } catch (e) {} }
     newDraft(); go(S.machines.length ? '#/' : '#/add');
   },
-  'rename-garage': () => prompt2('Garage name', 'Name', S.settings.garage, (v) => { S.settings.garage = v.trim() || "Bill's Garage"; save(); render(); }),
+  'rename-garage': () => prompt2('Garage name', 'Name', S.settings.garage, (v) => { S.settings.garage = v.trim() || 'My Garage'; save(); render(); }),
   'pick-cat': (el) => { draft.cat = el.dataset.cat; draft.unit = null; go('#/add/2'); },
   'toggle-draft-new': () => { draft.isNew = !draft.isNew; keepDraftFields(); render(); },
   'decode-vin': async () => {
@@ -1031,6 +1429,7 @@ const ACT = {
   },
   'add-next-2': () => {
     keepDraftFields();
+    if (draft.cat === 'cat') { if (!draft.name) draft.name = 'The Cat'; draft.unit = 'none'; draft.reading = ''; return go('#/add/4'); }
     if (!draft.name) draft.name = [draft.make, draft.model].filter(Boolean).join(' ') || (CATS[draft.cat] || CATS.other).label;
     go('#/add/3');
   },
@@ -1043,11 +1442,12 @@ const ACT = {
     save(); suggestSel = null; newDraft(); go('#/added/' + m.id);
   },
   'sug-toggle': (el) => { suggestSel.on[el.dataset.key] = !suggestSel.on[el.dataset.key]; el.querySelector('.switch').classList.toggle('on', suggestSel.on[el.dataset.key]); },
-  'sug-last': (el) => { suggestSel.last = el.dataset.v; render(); },
+  'sug-last': (el) => { if ($('#sg_date')) { suggestSel.date = val('sg_date'); suggestSel.reading = val('sg_r'); } suggestSel.last = el.dataset.v; render(); },
   'sug-save': (el) => {
     const m = M(el.dataset.id);
     templatesFor(m).filter((tp) => suggestSel.on[tp.key] && !S.items.some((i) => i.machineId === m.id && i.key === tp.key)).forEach((tp) => {
       const it = itemFromTemplate(m, tp, { isNew: m.isNew });
+      if (suggestSel.last === 'date') { const d = val('sg_date') || todayISO(); it.lastDate = d; it.lastReading = hasMeter(m) ? (num(val('sg_r')) ?? estReadingOn(m, d)) : it.lastReading; it.first = null; }
       if (suggestSel.last === 'unknown') { it.unknown = true; it.lastDate = addMonths(todayISO(), -(it.every.months || 120)); if (it.every.u) it.lastReading = (m.reading || 0) - it.every.u; it.first = null; }
       S.items.push(it);
     });
@@ -1151,7 +1551,7 @@ const ACT = {
     const msg = $('#ocrmsg'); msg.textContent = 'Reading… (first time takes a moment)';
     try {
       if (!window.Tesseract) await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js');
-      const blob = await idbGet('files', pendingReceipt.photoId);
+      const blob = await getPhotoBlob(pendingReceipt.photoId);
       const { data } = await window.Tesseract.recognize(blob, 'eng');
       const text = data.text || '';
       const lines = text.split('\n').map((s) => s.trim()).filter(Boolean);
@@ -1247,25 +1647,37 @@ const CHANGE = {
   'receipt-photo': async (el) => { const f = el.files[0]; if (!f) return; const id = await putPhoto(await compress(f, 2000, 0.85)); const r = route(); if (r[2]) { const rc = S.receipts.find((x) => x.id === r[2]); rc.photoId = id; save(); } else { pendingReceipt.photoId = id; pendingReceipt.ocr = null; } render(); },
   'log-photo': async (el) => { const f = el.files[0]; if (!f) return; logPhotos.push(await compress(f, 2000, 0.85)); $('#l_photoLabel').textContent = `${plural(logPhotos.length, 'photo')} attached · add another`; },
   restore: (el) => restoreFile(el.files[0]),
+  'import-file': async (el) => { const f = el.files[0]; if (!f) return; try { loadImport(await f.text(), f.name); render(); } catch (e) { toast("Couldn't read that file. Is it a CSV?"); } },
+  'imp-map': (el) => { imp.map[el.dataset.k] = el.value === '' ? '' : +el.value; render(); },
+  'imp-target': (el) => { const n = $('#imp_name'); if (n) imp.newName = n.value; imp.target = el.value; render(); },
+  'imp-vto': (el) => { imp.vmap[el.dataset.k].to = el.value; render(); },
+  'imp-cat': (el) => { const n = $('#imp_name'); if (n) imp.newName = n.value; if (el.dataset.k) imp.vmap[el.dataset.k].cat = el.value; else imp.newCat = el.value; },
 };
 
 /* ======================= exports ======================= */
 function download(name, blob) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
+let pendingBackup = null;
 async function doBackup() {
+  closeSheet();
   toast('Packing up your data…');
   const files = {};
-  const ids = new Set([...S.machines.map((m) => m.photoId), ...S.receipts.map((r) => r.photoId)].filter(Boolean));
-  for (const id of ids) { const b = await idbGet('files', id); if (b) files[id] = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(b); }); }
-  S.settings.lastBackup = todayISO(); save();
-  download(`garage-backup-${todayISO()}.json`, new Blob([JSON.stringify({ app: 'bills-garage', ...S, files })], { type: 'application/json' }));
-  render();
+  const ids = new Set(allPhotoIds());
+  for (const id of ids) { const b = await getPhotoBlob(id); if (b) files[id] = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(b); }); }
+  const name = `${(S.settings.garage || 'garage').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'garage'}-backup-${todayISO()}.json`;
+  const json = JSON.stringify({ app: 'bills-garage', ...S, files });
+  try { pendingBackup = new File([json], name, { type: 'application/json' }); } catch (e) { pendingBackup = new Blob([json], { type: 'application/json' }); pendingBackup.name = name; }
+  const t = $('.toast'); if (t) t.remove();
+  sheet(`${sheetHead('Backup ready')}
+    <div class="card dark stack"><div class="row between"><span class="muted">Machines</span><b>${S.machines.length}</b></div><div class="row between"><span class="muted">Services logged</span><b>${S.logs.length}</b></div><div class="row between"><span class="muted">Photos</span><b>${Object.keys(files).length}</b></div><div class="row between"><span class="muted">Size</span><b>${(json.length / 1048576).toFixed(json.length > 1048576 ? 1 : 2)} MB</b></div></div>
+    <p class="note" style="margin:0">Save it somewhere that isn’t just this phone: Files → iCloud Drive, Google Drive, or email it to yourself. To bring it back, use Profile → Restore.</p>
+    <div class="sheet-actions"><button class="btn primary" data-act="backup-save">${icon('save', 18)}Save backup file</button></div>`);
 }
 async function restoreFile(file) {
   if (!file) return;
   try {
     const j = JSON.parse(await file.text());
     if (!j.machines) throw new Error('bad');
-    for (const [id, d] of Object.entries(j.files || {})) { const b = await (await fetch(d)).blob(); await idbPut('files', id, b); }
+    for (const [id, d] of Object.entries(j.files || {})) { const b = await (await fetch(d)).blob(); await idbPut('files', id, { type: b.type || 'image/jpeg', buf: await b.arrayBuffer() }); delete urlCache[id]; }
     delete j.files; delete j.app;
     S = Object.assign(blank(), j); S.settings = Object.assign(blank().settings, j.settings || {}, { onboarded: true });
     save(); go('#/'); toast(`Restored ${plural(S.machines.length, 'machine')}`);
@@ -1302,13 +1714,17 @@ async function checkNotify(force) {
   if (!force && S.settings.lastNotify === todayISO()) return;
   const r = ranked();
   const over = r.filter((x) => x.st.state === 'over'), soon = r.filter((x) => x.st.state === 'soon');
-  if (!over.length && !soon.length) { if (force) toast('Reminders on. Nothing due right now'); return; }
+  const bk = backupStatus();
+  if (!over.length && !soon.length) {
+    if (bk && bk.over && S.settings.lastNotify !== todayISO()) { try { const reg = navigator.serviceWorker && (await navigator.serviceWorker.getRegistration()); if (reg) reg.showNotification('Time to back up your garage', { body: 'Takes 10 seconds. Profile → Back up everything.', icon: 'icon-192.png', tag: 'garage-backup' }); } catch (e) {} S.settings.lastNotify = todayISO(); save(); return; }
+    if (force) toast('Reminders on. Nothing due right now'); return;
+  }
   const title = over.length ? `${plural(over.length, 'thing')} overdue` : `${plural(soon.length, 'thing')} due soon`;
   const body = [...over, ...soon].slice(0, 3).map((x) => `${M(x.it.machineId).name}: ${x.it.title}`).join('\n');
   try {
     const reg = navigator.serviceWorker && (await navigator.serviceWorker.getRegistration());
-    if (reg) reg.showNotification(title, { body, icon: 'icon.svg', badge: 'icon.svg', tag: 'garage-due' });
-    else new Notification(title, { body, icon: 'icon.svg' });
+    if (reg) reg.showNotification(title, { body, icon: 'icon-192.png', badge: 'icon-192.png', tag: 'garage-due' });
+    else new Notification(title, { body, icon: 'icon-192.png' });
   } catch (e) {}
   S.settings.lastNotify = todayISO(); save();
 }
@@ -1324,11 +1740,13 @@ document.addEventListener('keydown', (e) => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role="button"][data-act]')) { e.preventDefault(); e.target.click(); }
   if (e.key === 'Escape') { closeSheet(); closeFab(); }
 });
+window.addEventListener('scroll', () => { const t = document.getElementById('itemHdrTitle'); if (t) t.style.opacity = window.scrollY > 170 ? 1 : 0; }, { passive: true });
 document.addEventListener('change', (e) => { const el = e.target.closest('[data-change]'); if (el && CHANGE[el.dataset.change]) CHANGE[el.dataset.change](el, e); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { checkNotify(); if (!$('#scrim') && !route().some((x) => ['add', 'custom', 'receipt', 'warranty', 'note', 'fuel', 'specs', 'edit'].includes(x))) render(); } });
 
 (async function boot() {
   await load();
+  try { await warmPhotos(); } catch (e) {}
   if ('serviceWorker' in navigator) { try { await navigator.serviceWorker.register('sw.js'); } catch (e) {} }
   if (navigator.storage && navigator.storage.persist) { try { navigator.storage.persist(); } catch (e) {} }
   render();

@@ -1,6 +1,6 @@
-/* Bill's Garage service worker: caches the app so it opens with no signal. Bump CACHE when files change. */
-const CACHE = 'bills-garage-v3';
-const ASSETS = ['./', './index.html', './styles.css?v=3', './data.js?v=3', './app.js?v=3', './manifest.webmanifest', './icon.svg', './fonts/bebas-neue-latin-400-normal.woff2', './fonts/public-sans-latin-400-normal.woff2', './fonts/public-sans-latin-500-normal.woff2', './fonts/public-sans-latin-600-normal.woff2', './fonts/public-sans-latin-700-normal.woff2'];
+/* Garage service worker: caches the app so it opens with no signal. Bump CACHE when files change. */
+const CACHE = 'bills-garage-v4';
+const ASSETS = ['./', './index.html', './styles.css?v=4', './data.js?v=4', './app.js?v=4', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png', './icon-180.png?v=4', './fonts/bebas-neue-latin-400-normal.woff2', './fonts/public-sans-latin-400-normal.woff2', './fonts/public-sans-latin-500-normal.woff2', './fonts/public-sans-latin-600-normal.woff2', './fonts/public-sans-latin-700-normal.woff2'];
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
 });

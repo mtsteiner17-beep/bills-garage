@@ -1,6 +1,6 @@
-# Bill's Garage
+# Garage
 
-A maintenance tracker for trucks, cars, motorcycles, mowers, tractors, generators, pressure washers, log splitters and anything else with an engine. Built from the "IOT project" Figma design (same dark look, Bebas Neue + Public Sans, red overdue cards).
+A maintenance tracker for trucks, cars, motorcycles, e-bikes, electric dirt bikes, mowers, tractors, generators, pressure washers, log splitters and anything else with an engine. Built from the "IOT project" Figma design (same dark look, Bebas Neue + Public Sans, red overdue cards).
 
 Live at: https://mtsteiner17-beep.github.io/bills-garage/
 
@@ -20,9 +20,18 @@ It works with no signal after the first load. Everything is saved on the phone i
 - VIN lookup and safety recall check for vehicles (free NHTSA data)
 - Fuel log with MPG, spending per machine, printable service report, CSV export
 - Spring and winter checklists, calendar export, backup & restore
+- Name your own garage during setup (shows on the Home Screen icon too)
+- Backup reminder that shows up like a maintenance item (every 2 weeks / month / 3 months / off)
+- Import history from VMT, Fuelly, Drivvo or any spreadsheet CSV (auto-matches columns and maintenance items)
+- Quick schedule editor: change the interval or when it was last done in two taps
+- Add to Home Screen walkthrough for iPhone (Safari/Chrome) and Android
+- A cat. Yes, really.
+- Icons from Lucide (ISC license)
 
 ## Files
 `index.html`, `styles.css`, `data.js` (the maintenance database), `app.js`, `sw.js` (offline), `manifest.webmanifest`, icons.
 Optional: add `lineup.jpg` (the machine lineup image from Figma) to show the panning photo on the welcome screen.
 
 Intervals are general starting points. Check each owner's manual and edit them in the app.
+
+Made by Masen · https://masen.site
