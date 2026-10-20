@@ -1,0 +1,1532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>Bill's Garage — Maintenance Tracker</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Public+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#000000; --card:#383838; --surface:#1F1F1F; --surface2:#1A1A1A;
+  --btn-grey:#4A4A4A; --line:#2c2c2c;
+  --green:#12FF54; --yellow:#FFC531; --red:#FF453A; --red-deep:#5E0B0B;
+  --text:#FFFFFF; --text-dim:#B9B9B9; --text-faint:#8A8A8A;
+  --r-card:12px; --r-pill:99px; --r-sheet:28px;
+  --font-body:'Public Sans',-apple-system,'Segoe UI',Roboto,sans-serif;
+  --font-title:'Bebas Neue','Arial Narrow',sans-serif;
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+html,body{margin:0;padding:0;background:#0a0a0a;color:var(--text);font-family:var(--font-body);font-size:15px;}
+body{min-height:100vh;}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit;}
+input,select,textarea{font-family:inherit;font-size:16px;color:var(--text);}
+:focus-visible{outline:2px solid var(--green);outline-offset:2px;}
+#app{max-width:430px;margin:0 auto;background:var(--bg);min-height:100vh;position:relative;padding-bottom:110px;}
+.view{display:none;}
+.view.active{display:block;animation:fadein .18s ease;}
+@keyframes fadein{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion: reduce){.view.active{animation:none}}
+
+/* ---------- header ---------- */
+.topbar{position:sticky;top:0;z-index:40;background:linear-gradient(#000 78%,rgba(0,0,0,0));padding:18px 16px 10px;display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.garage-title{font-family:var(--font-title);font-size:34px;letter-spacing:.5px;line-height:1;display:flex;align-items:center;gap:6px;}
+.garage-title .chev{font-size:16px;color:var(--text-dim);font-family:var(--font-body);}
+.round-btn{width:44px;height:44px;min-width:44px;border-radius:50%;background:var(--btn-grey);display:flex;align-items:center;justify-content:center;font-size:24px;color:#fff;}
+.round-btn.small{width:36px;height:36px;font-size:20px;}
+.round-btn svg{width:20px;height:20px;}
+
+/* ---------- machine carousel ---------- */
+.carousel{display:flex;gap:12px;overflow-x:auto;padding:6px 16px 4px;scroll-snap-type:x mandatory;scrollbar-width:none;}
+.carousel::-webkit-scrollbar{display:none;}
+.machine-card{scroll-snap-align:start;flex:0 0 148px;border-radius:14px;overflow:hidden;background:var(--surface);text-align:left;padding:0;position:relative;}
+.machine-card .art{height:110px;display:flex;align-items:center;justify-content:center;position:relative;}
+.machine-card .art svg{width:118px;height:74px;}
+.machine-card .mname{font-family:var(--font-title);font-size:19px;letter-spacing:.5px;padding:8px 10px 2px;line-height:1.05;}
+.machine-card .mread{font-size:11px;color:var(--text-dim);padding:0 10px 8px;}
+.machine-card .chips{padding:0 10px 10px;display:flex;gap:6px;flex-wrap:wrap;}
+.add-card{flex:0 0 120px;height:188px;border:1.5px solid #fff;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#fff;font-size:14px;background:transparent;}
+
+/* ---------- chips ---------- */
+.chip{display:inline-flex;align-items:center;gap:5px;border:1.5px solid var(--text-faint);color:#fff;border-radius:var(--r-pill);padding:3px 9px;font-size:12px;font-weight:600;background:rgba(0,0,0,.35);}
+.chip svg{width:13px;height:13px;}
+.chip.warn{border-color:var(--yellow);color:var(--yellow);}
+.chip.over{border-color:var(--red);color:#FF7A70;}
+.chip.ok{border-color:var(--green);color:var(--green);}
+
+/* ---------- sections & lists ---------- */
+.section-title{font-size:20px;font-weight:600;padding:18px 16px 10px;}
+.section-title.small{font-size:16px;padding-top:14px;}
+.list{padding:0 16px;display:flex;flex-direction:column;gap:10px;}
+.mrow{background:var(--card);border-radius:var(--r-card);padding:12px 14px;display:block;width:100%;text-align:left;}
+.mrow .r1{display:flex;align-items:center;gap:8px;}
+.mrow .mtitle{font-family:var(--font-title);font-size:19px;letter-spacing:.5px;flex:1;text-align:center;line-height:1;}
+.mrow .due{font-size:14px;margin-top:8px;color:#fff;}
+.mrow .lastdone{font-size:12px;color:var(--text-dim);margin-top:3px;}
+.progress{height:6px;border-radius:99px;background:#101010;margin-top:9px;overflow:hidden;}
+.progress > i{display:block;height:100%;border-radius:99px;background:var(--green);}
+.progress > i.warn{background:var(--yellow);}
+.progress > i.over{background:var(--red);}
+.log-btn{background:#fff;color:#000;font-weight:600;border-radius:var(--r-pill);padding:8px 18px;font-size:14px;min-height:36px;}
+.log-btn.small{padding:6px 14px;font-size:13px;}
+.mrow.overdue{background:linear-gradient(160deg,#8E1210 0%,var(--red-deep) 55%,#380404 100%);border:1.5px solid var(--red);}
+.mrow.overdue .big-log{margin-top:12px;display:flex;gap:10px;align-items:center;}
+.mrow.overdue .big-log .log-btn{flex:1;min-height:52px;font-size:16px;border-radius:var(--r-pill);}
+.icon-actions{display:flex;gap:8px;}
+.icon-btn{width:48px;height:48px;border-radius:50%;background:var(--btn-grey);display:flex;align-items:center;justify-content:center;}
+.icon-btn svg{width:21px;height:21px;}
+.empty-card{background:var(--surface);border-radius:var(--r-card);padding:22px 16px;text-align:center;color:var(--text-dim);margin:0 16px;}
+.empty-card b{color:#fff;display:block;font-size:16px;margin-bottom:6px;}
+
+/* ---------- tab bar ---------- */
+.tabbar{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:min(430px,100%);z-index:50;padding:10px 22px calc(14px + env(safe-area-inset-bottom));background:linear-gradient(rgba(0,0,0,0),#000 38%);display:flex;justify-content:space-around;}
+.tabbar button{display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--text-faint);font-size:11px;font-weight:600;min-width:64px;min-height:48px;justify-content:center;}
+.tabbar button svg{width:24px;height:24px;}
+.tabbar button.active{color:#fff;}
+
+/* ---------- detail screens ---------- */
+.detail-head{padding:14px 16px 4px;display:flex;align-items:center;gap:12px;}
+.detail-head .back{width:44px;height:44px;border-radius:50%;background:var(--btn-grey);display:flex;align-items:center;justify-content:center;font-size:20px;}
+.detail-head h1{font-family:var(--font-title);font-size:30px;margin:0;letter-spacing:.5px;flex:1;line-height:1;}
+.hero-art{margin:10px 16px 0;border-radius:14px;background:var(--surface);height:170px;display:flex;align-items:center;justify-content:center;}
+.hero-art svg{width:250px;height:130px;}
+.reading-box{margin:12px 16px 0;background:var(--surface);border-radius:var(--r-card);padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.reading-box .val{font-family:var(--font-title);font-size:32px;line-height:1;}
+.reading-box .lbl{font-size:12px;color:var(--text-dim);}
+.tabrow{display:flex;gap:8px;padding:16px 16px 4px;}
+.tabrow button{flex:1;padding:11px 0;border-radius:var(--r-pill);background:var(--surface);color:var(--text-dim);font-weight:600;font-size:14px;min-height:44px;}
+.tabrow button.active{background:#fff;color:#000;}
+.kv{display:flex;justify-content:space-between;padding:11px 0;border-bottom:1px solid var(--line);font-size:14px;gap:14px;}
+.kv:last-child{border-bottom:none;}
+.kv .k{color:var(--text-dim);}
+.kv .v{font-weight:600;text-align:right;}
+.panel{margin:12px 16px 0;background:var(--surface);border-radius:var(--r-card);padding:6px 16px 10px;}
+.panel.flat{background:var(--card);}
+.note-card{background:var(--card);border-radius:var(--r-card);padding:12px 14px;text-align:left;width:100%;}
+.note-card .ndate{font-size:12px;color:var(--text-dim);margin-top:6px;}
+.pin{color:var(--yellow);font-size:12px;font-weight:700;}
+
+/* ---------- sheets & forms ---------- */
+.sheet-wrap{position:fixed;inset:0;z-index:80;display:none;}
+.sheet-wrap.open{display:block;}
+.sheet-bg{position:absolute;inset:0;background:rgba(0,0,0,.65);}
+.sheet{position:absolute;left:50%;transform:translateX(-50%);bottom:0;width:min(430px,100%);max-height:92vh;overflow-y:auto;background:#141414;border-radius:var(--r-sheet) var(--r-sheet) 0 0;padding:10px 20px calc(22px + env(safe-area-inset-bottom));animation:up .22s ease;}
+@keyframes up{from{transform:translate(-50%,40px);opacity:.4}to{transform:translate(-50%,0);opacity:1}}
+@media (prefers-reduced-motion: reduce){.sheet{animation:none}}
+.sheet .handle{width:44px;height:5px;border-radius:99px;background:#555;margin:2px auto 14px;}
+.sheet h2{font-family:var(--font-title);font-size:27px;margin:0 0 4px;letter-spacing:.5px;}
+.sheet .sub{color:var(--text-dim);font-size:13px;margin-bottom:14px;}
+.field{margin-bottom:14px;}
+.field label{display:block;font-size:13px;font-weight:600;color:var(--text-dim);margin-bottom:6px;}
+.field input,.field select,.field textarea{width:100%;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:13px 14px;min-height:48px;}
+.field textarea{min-height:76px;resize:vertical;}
+.field-row{display:flex;gap:10px;}
+.field-row .field{flex:1;}
+.btn-primary{background:#fff;color:#000;font-weight:600;border-radius:var(--r-pill);width:100%;min-height:52px;font-size:16px;display:flex;align-items:center;justify-content:center;gap:8px;}
+.btn-secondary{background:var(--btn-grey);color:#fff;font-weight:600;border-radius:var(--r-pill);width:100%;min-height:52px;font-size:15px;display:flex;align-items:center;justify-content:center;gap:8px;}
+.btn-text{color:var(--text-dim);font-weight:600;min-height:44px;padding:8px 12px;}
+.btn-danger{color:#FF7A70;font-weight:600;min-height:44px;}
+.btn-row{display:flex;gap:10px;}
+.btn-row > *{flex:1;}
+.toggle-row{display:flex;align-items:center;gap:12px;background:var(--surface);border-radius:10px;padding:12px 14px;margin-bottom:10px;width:100%;text-align:left;min-height:56px;}
+.toggle-row .ticon{width:38px;height:38px;border-radius:50%;background:var(--btn-grey);display:flex;align-items:center;justify-content:center;flex:0 0 38px;}
+.toggle-row .ticon svg{width:19px;height:19px;}
+.toggle-row .tt{flex:1;}
+.toggle-row .tt b{display:block;font-size:15px;}
+.toggle-row .tt span{font-size:12px;color:var(--text-dim);}
+.switch{width:52px;height:30px;border-radius:99px;background:#555;position:relative;flex:0 0 52px;}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#fff;transition:left .15s;}
+.switch.on{background:var(--green);}
+.switch.on::after{left:25px;background:#000;}
+.check-dot{width:26px;height:26px;border-radius:50%;border:2px solid var(--text-faint);flex:0 0 26px;display:flex;align-items:center;justify-content:center;color:#000;font-weight:700;}
+.check-dot.on{background:var(--green);border-color:var(--green);}
+.pad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:14px 0;}
+.pad button{background:var(--surface);border-radius:12px;min-height:62px;font-size:24px;font-weight:600;}
+.pad button:active{background:var(--btn-grey);}
+.pad-display{font-family:var(--font-title);font-size:46px;text-align:center;letter-spacing:2px;padding:8px 0 2px;}
+.pad-unit{text-align:center;color:var(--text-dim);font-size:13px;}
+.seg{display:flex;gap:8px;flex-wrap:wrap;}
+.seg button{padding:11px 16px;border-radius:var(--r-pill);background:var(--surface);font-weight:600;font-size:14px;min-height:46px;border:1.5px solid transparent;}
+.seg button.active{background:#fff;color:#000;}
+.menu-item{display:flex;align-items:center;gap:14px;width:100%;padding:15px 4px;border-bottom:1px solid var(--line);text-align:left;font-size:16px;font-weight:600;min-height:56px;}
+.menu-item:last-child{border-bottom:none;}
+.menu-item .ticon{width:42px;height:42px;border-radius:50%;background:var(--btn-grey);display:flex;align-items:center;justify-content:center;}
+.menu-item .ticon svg{width:20px;height:20px;}
+.menu-item .arr{margin-left:auto;color:var(--text-faint);}
+
+/* ---------- misc ---------- */
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:110px;z-index:120;background:#fff;color:#000;border-radius:var(--r-pill);padding:12px 18px;font-weight:600;font-size:14px;display:none;align-items:center;gap:14px;box-shadow:0 8px 30px rgba(0,0,0,.5);max-width:92vw;}
+.toast.show{display:flex;}
+.toast button{color:#0a58ca;font-weight:700;}
+.nudge{margin:0 16px 12px;background:#26260f;border:1.5px solid var(--yellow);border-radius:var(--r-card);padding:13px 15px;display:flex;gap:10px;align-items:center;}
+.nudge .nt{flex:1;}
+.nudge b{display:block;font-size:15px;}
+.nudge span{font-size:13px;color:var(--text-dim);}
+.warranty-card{margin:0 16px 12px;background:#12260f;border:1.5px solid var(--green);border-radius:var(--r-card);padding:13px 15px;}
+.warranty-card b{display:block;font-size:15px;}
+.warranty-card span{font-size:13px;color:var(--text-dim);}
+.group-label{font-size:13px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:1px;padding:16px 16px 8px;}
+.disclaimer{font-size:12px;color:var(--text-faint);padding:10px 16px 0;line-height:1.5;}
+.searchbar{padding:4px 16px 0;}
+.searchbar input{width:100%;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-pill);padding:13px 18px;min-height:48px;}
+.stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 16px;}
+.stat{background:var(--surface);border-radius:var(--r-card);padding:14px;}
+.stat .sv{font-family:var(--font-title);font-size:28px;line-height:1;}
+.stat .sl{font-size:12px;color:var(--text-dim);margin-top:4px;}
+.check-item{display:flex;gap:12px;align-items:flex-start;padding:13px 0;border-bottom:1px solid var(--line);width:100%;text-align:left;}
+.check-item:last-child{border-bottom:none;}
+.check-item .ct{flex:1;font-size:15px;}
+.check-item.done .ct{color:var(--text-faint);text-decoration:line-through;}
+.bar-row{display:flex;align-items:center;gap:10px;font-size:13px;padding:7px 0;}
+.bar-row .bl{width:96px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.bar-row .track{flex:1;height:10px;background:#101010;border-radius:99px;overflow:hidden;}
+.bar-row .track i{display:block;height:100%;background:var(--green);border-radius:99px;}
+.bar-row .bv{width:64px;text-align:right;font-weight:600;}
+.onboard{position:fixed;inset:0;z-index:200;background:#000;display:none;flex-direction:column;padding:34px 24px calc(28px + env(safe-area-inset-bottom));}
+.onboard.open{display:flex;}
+.onboard .olineup{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+.onboard h1{font-family:var(--font-title);font-size:44px;margin:0 0 8px;letter-spacing:.5px;line-height:1;}
+.onboard p{color:var(--text-dim);font-size:16px;line-height:1.55;margin:0 0 22px;}
+.dots{display:flex;gap:7px;justify-content:center;margin:18px 0;}
+.dots i{width:8px;height:8px;border-radius:50%;background:#444;}
+.dots i.on{background:#fff;}
+@media print{ .tabbar,.topbar,.no-print{display:none!important;} #app{padding-bottom:0;} body{background:#fff;color:#000;} }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<nav class="tabbar" id="tabbar"></nav>
+<div class="sheet-wrap" id="sheetWrap"><div class="sheet-bg" id="sheetBg"></div><div class="sheet" id="sheet"></div></div>
+<div class="toast" id="toast"><span id="toastMsg"></span><button id="toastBtn" style="display:none">Undo</button></div>
+<div class="onboard" id="onboard"></div>
+
+<!-- ============ SVG icon set (stroke, currentColor) ============ -->
+<svg width="0" height="0" style="position:absolute">
+<defs>
+<symbol id="i-oil" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V10l4-4h9a2 2 0 0 1 2 2v13"/><path d="M4 21h17"/><path d="M8 6l3-3h4"/><circle cx="12" cy="14" r="2.5"/></symbol>
+<symbol id="i-blades" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20L14 10"/><path d="M14 10l-2-1 5-5 1 2z"/><path d="M20 4l-3 3"/><circle cx="16" cy="8" r="1.2" fill="currentColor"/></symbol>
+<symbol id="i-battery" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M8 8V5h3v3M13 8V5h3v3M12 11v4M10 13h4"/></symbol>
+<symbol id="i-filter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16l-6 7v6l-4 2v-8z"/></symbol>
+<symbol id="i-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 3v5M15 3v5M7 8h10v3a5 5 0 0 1-10 0zM12 16v5"/></symbol>
+<symbol id="i-belt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="12" r="4"/><circle cx="17" cy="12" r="2.5"/><path d="M8 8c4-1 8-1 9 2"/></symbol>
+<symbol id="i-tire" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/><path d="M12 3v5.5M12 15.5V21M3 12h5.5M15.5 12H21"/></symbol>
+<symbol id="i-coolant" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3c3 4 6 7 6 11a6 6 0 0 1-12 0c0-4 3-7 6-11z"/></symbol>
+<symbol id="i-grease" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v8"/><path d="M8 8l4-5 4 5"/><path d="M5 21c0-4 3-6 7-6s7 2 7 6"/></symbol>
+<symbol id="i-fuel" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 21V6a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v15"/><path d="M3 21h14M15 10h3a2 2 0 0 1 2 2v6a1.5 1.5 0 0 0 3 0V9l-2.5-2.5"/></symbol>
+<symbol id="i-wrench" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14.5 6.5a4 4 0 0 0-5.6 4.8L4 16.2V20h3.8l4.9-4.9a4 4 0 0 0 4.8-5.6l-2.9 2.9-2.4-2.4z"/></symbol>
+<symbol id="i-warranty" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+<symbol id="i-note" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></symbol>
+<symbol id="i-receipt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 3h12v18l-2-1.5-2 1.5-2-1.5-2 1.5-2-1.5L6 21z"/><path d="M9 8h6M9 12h6"/></symbol>
+<symbol id="i-garage" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10M10 20v-6h4v6"/></symbol>
+<symbol id="i-sched" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="6" width="16" height="15" rx="2"/><path d="M4 10h16M8 3v5M16 3v5"/></symbol>
+<symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.5-6 8-6s8 2 8 6"/></symbol>
+<symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></symbol>
+<symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></symbol>
+<symbol id="i-snooze" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M4 12.5l5 5L20 6.5"/></symbol>
+<symbol id="i-chain" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5"/></symbol>
+<symbol id="i-snow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v20M4 6l16 12M20 6L4 18"/></symbol>
+<symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></symbol>
+</defs>
+</svg>
+<script>
+/* =====================================================================
+   BILL'S GARAGE — maintenance tracker
+   Single file. Data lives in this browser's localStorage. Works offline
+   after the first load (service worker caches the app shell).
+   ===================================================================== */
+"use strict";
+const STORE_KEY = "bills-garage-v1";
+const DAY = 86400000;
+const $ = (sel, el) => (el||document).querySelector(sel);
+const $$ = (sel, el) => Array.from((el||document).querySelectorAll(sel));
+const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const uid = () => Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4);
+const todayStr = () => { const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
+const parseDate = s => { if(!s) return null; const p=s.split("-"); return new Date(p[0],p[1]-1,p[2]); };
+const fmtDate = s => { const d=parseDate(s); if(!d) return "—"; return d.toLocaleDateString("en-US",{month:"short",day:"numeric"}); };
+const fmtDateLong = s => { const d=parseDate(s); if(!d) return "—"; return d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}); };
+const daysBetween = (a,b) => Math.round((parseDate(b)-parseDate(a))/DAY);
+const addDays = (s,n) => { const d=parseDate(s); d.setDate(d.getDate()+n); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
+const addMonths = (s,n) => { const d=parseDate(s); const day=d.getDate(); d.setMonth(d.getMonth()+n); if(d.getDate()<day) d.setDate(0); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
+const money = n => n==null||n===""?"—":"$"+Number(n).toFixed(2);
+const icon = (name, color) => `<svg style="${color?`color:${color};`:""}width:100%;height:100%"><use href="#${name}"/></svg>`;
+const UNIT_LABEL = { miles:"mi", km:"km", hours:"hrs", uses:"uses", none:"" };
+
+/* =====================================================================
+   MAINTENANCE TEMPLATE DATABASE (bundled, works offline)
+   Every item: source + confidence. Show "Starting point — check your
+   owner's manual" anywhere these are surfaced.
+   ===================================================================== */
+const DB_VERSION = 3;
+const DB = {
+  version: DB_VERSION,
+  categories: {
+    "riding-mower":   { label:"Riding mower / zero-turn", units:["hours","uses"], usesLabel:"mow" },
+    "push-mower":     { label:"Push mower", units:["hours","uses"], usesLabel:"mow" },
+    "generator":      { label:"Generator", units:["hours"], usesLabel:"run" },
+    "truck":          { label:"Truck / car", units:["miles","km"], usesLabel:"drive" },
+    "motorcycle":     { label:"Motorcycle", units:["miles","km"], usesLabel:"ride" },
+    "tractor":        { label:"Compact tractor", units:["hours"], usesLabel:"run" },
+    "pressure-washer":{ label:"Pressure washer", units:["hours"], usesLabel:"use" },
+    "log-splitter":   { label:"Log splitter", units:["hours"], usesLabel:"use" },
+    "chainsaw":       { label:"Chainsaw", units:["hours"], usesLabel:"use" },
+    "snowblower":     { label:"Snowblower", units:["hours"], usesLabel:"use" },
+    "trailer":        { label:"Trailer", units:["miles","km"], usesLabel:"tow" },
+    "other":          { label:"Other equipment", units:["hours","miles","km","uses"], usesLabel:"use" }
+  },
+  /* per-category defaults; model overrides merged on top */
+  templates: {
+    "riding-mower": [
+      { id:"rm-oil", title:"Engine oil + filter", icon:"i-oil", interval:{hours:50, months:12}, first:{hours:8, note:"break-in change"}, severe:{hours:35}, parts:[{type:"oil",spec:"10W-30 conventional, 2 qt"},{type:"oil filter",part:"verify in manual"}], diyMin:30, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"rm-blades", title:"Sharpen / balance blades", icon:"i-blades", interval:{hours:25}, parts:[], diyMin:45, difficulty:"medium", confidence:"general", source:"general guideline" },
+      { id:"rm-air", title:"Air filter clean / replace", icon:"i-filter", interval:{hours:100, months:12}, parts:[{type:"air filter",spec:"check manual"}], diyMin:15, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"rm-plug", title:"Spark plug", icon:"i-plug", interval:{hours:100, months:24}, parts:[{type:"spark plug",spec:"check manual"}], diyMin:20, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"rm-deckbelt", title:"Deck belt inspection", icon:"i-belt", interval:{hours:100}, parts:[], diyMin:20, difficulty:"medium", confidence:"general", source:"general guideline" },
+      { id:"rm-grease", title:"Grease fittings", icon:"i-grease", interval:{hours:50}, parts:[], diyMin:15, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"rm-hydro", title:"Transmission fluid + filter", icon:"i-oil", interval:{hours:500, months:60}, parts:[{type:"hydro fluid",spec:"per manual"}], diyMin:60, difficulty:"hard", confidence:"general", source:"general guideline" },
+      { id:"rm-storage", title:"End-of-season storage", icon:"i-snow", interval:{months:12}, parts:[{type:"fuel stabilizer",spec:"per label"}], diyMin:30, difficulty:"easy", confidence:"general", source:"general guideline" }
+    ],
+    "generator": [
+      { id:"gen-oil", title:"Engine oil", icon:"i-oil", interval:{hours:100, months:6}, first:{hours:25, note:"break-in change"}, severe:{hours:50}, parts:[{type:"oil",spec:"10W-30, ~0.6 qt"}], diyMin:20, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"gen-air", title:"Air filter", icon:"i-filter", interval:{hours:200, months:12}, parts:[{type:"air filter",spec:"check manual"}], diyMin:10, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"gen-plug", title:"Spark plug", icon:"i-plug", interval:{hours:200, months:24}, parts:[{type:"spark plug",spec:"check manual"}], diyMin:15, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"gen-arrestor", title:"Spark arrestor cleaning", icon:"i-wrench", interval:{hours:100}, parts:[], diyMin:15, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"gen-exercise", title:"Monthly exercise run", icon:"i-fuel", interval:{months:1}, parts:[], diyMin:20, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"gen-storage", title:"Fuel stabilizer / storage", icon:"i-snow", interval:{months:12}, parts:[{type:"fuel stabilizer",spec:"per label"}], diyMin:15, difficulty:"easy", confidence:"general", source:"general guideline" }
+    ],
+    "truck": [
+      { id:"t-oil", title:"Oil + filter", icon:"i-oil", interval:{miles:7500, months:6}, severe:{miles:5000, months:6}, parts:[{type:"oil",spec:"5W-30 synthetic"},{type:"oil filter",part:"verify"}], diyMin:40, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"t-rotate", title:"Tire rotation", icon:"i-tire", interval:{miles:7500}, parts:[], diyMin:45, difficulty:"medium", confidence:"general", source:"general guideline" },
+      { id:"t-air", title:"Engine air filter", icon:"i-filter", interval:{miles:30000, months:36}, parts:[{type:"air filter",spec:"check manual"}], diyMin:15, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"t-cabin", title:"Cabin air filter", icon:"i-filter", interval:{miles:20000, months:12}, parts:[{type:"cabin filter",spec:"check manual"}], diyMin:15, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"t-brakes", title:"Brake inspection", icon:"i-wrench", interval:{miles:15000}, parts:[], diyMin:30, difficulty:"medium", confidence:"general", source:"general guideline" },
+      { id:"t-coolant", title:"Coolant service", icon:"i-coolant", interval:{miles:100000, months:60}, parts:[{type:"coolant",spec:"per manual"}], diyMin:60, difficulty:"medium", confidence:"general", source:"general guideline" },
+      { id:"t-trans", title:"Transmission fluid", icon:"i-oil", interval:{miles:60000}, parts:[{type:"ATF",spec:"per manual"}], diyMin:90, difficulty:"hard", confidence:"general", source:"general guideline" },
+      { id:"t-plugs", title:"Spark plugs", icon:"i-plug", interval:{miles:100000}, parts:[{type:"spark plug",spec:"per manual"}], diyMin:90, difficulty:"medium", confidence:"general", source:"general guideline" },
+      { id:"t-wipers", title:"Wiper blades", icon:"i-wrench", interval:{months:12}, parts:[], diyMin:10, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"t-battery", title:"Battery test", icon:"i-battery", interval:{months:12}, parts:[], diyMin:10, difficulty:"easy", confidence:"general", source:"general guideline" }
+    ],
+    "motorcycle": [
+      { id:"m-oil", title:"Oil + filter", icon:"i-oil", interval:{miles:7500, months:12}, first:{miles:600, note:"break-in change"}, parts:[{type:"oil",spec:"10W-40 motorcycle oil"}], diyMin:40, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"m-chain", title:"Chain clean / lube / adjust", icon:"i-chain", interval:{miles:500}, parts:[{type:"chain lube",spec:"per manual"}], diyMin:30, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"m-brakefluid", title:"Brake fluid", icon:"i-coolant", interval:{months:24}, parts:[{type:"brake fluid",spec:"DOT 4"}], diyMin:45, difficulty:"medium", confidence:"general", source:"general guideline" },
+      { id:"m-coolant", title:"Coolant", icon:"i-coolant", interval:{months:36}, parts:[{type:"coolant",spec:"per manual"}], diyMin:45, difficulty:"medium", confidence:"general", source:"general guideline" },
+      { id:"m-tires", title:"Tire check / replace", icon:"i-tire", interval:{months:12}, parts:[], diyMin:20, difficulty:"easy", confidence:"general", source:"general guideline" }
+    ],
+    "tractor": [
+      { id:"tr-oil", title:"Engine oil + filter", icon:"i-oil", interval:{hours:200, months:12}, first:{hours:50, note:"break-in change"}, parts:[{type:"oil",spec:"15W-40 diesel"}], diyMin:40, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"tr-hydro", title:"Hydraulic + transmission fluid + filters", icon:"i-oil", interval:{hours:400, months:24}, parts:[{type:"hydro fluid",spec:"per manual"}], diyMin:90, difficulty:"hard", confidence:"general", source:"general guideline" },
+      { id:"tr-fuel", title:"Fuel filter", icon:"i-filter", interval:{hours:200}, parts:[{type:"fuel filter",spec:"per manual"}], diyMin:30, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"tr-air", title:"Air filter", icon:"i-filter", interval:{hours:200, months:12}, parts:[{type:"air filter",spec:"per manual"}], diyMin:15, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"tr-grease", title:"Grease loader pins + fittings", icon:"i-grease", interval:{hours:25}, parts:[], diyMin:20, difficulty:"easy", confidence:"general", source:"general guideline" }
+    ],
+    "pressure-washer": [
+      { id:"pw-oil", title:"Engine oil (gas models)", icon:"i-oil", interval:{hours:50, months:12}, first:{hours:8, note:"break-in change"}, parts:[{type:"oil",spec:"10W-30"}], diyMin:20, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"pw-pumpoil", title:"Pump oil", icon:"i-oil", interval:{hours:500}, parts:[{type:"pump oil",spec:"per manual"}], diyMin:20, difficulty:"medium", confidence:"general", source:"general guideline" },
+      { id:"pw-inlet", title:"Inlet filter + nozzles", icon:"i-filter", interval:{hours:100}, parts:[], diyMin:10, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"pw-winter", title:"Winterize pump", icon:"i-snow", interval:{months:12}, parts:[{type:"pump saver",spec:"per label"}], diyMin:15, difficulty:"easy", confidence:"general", source:"general guideline" }
+    ],
+    "log-splitter": [
+      { id:"ls-oil", title:"Engine oil", icon:"i-oil", interval:{hours:100, months:12}, first:{hours:8, note:"break-in change"}, parts:[{type:"oil",spec:"10W-30"}], diyMin:20, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"ls-hydro", title:"Hydraulic fluid + filter", icon:"i-oil", interval:{hours:200}, parts:[{type:"hydro fluid",spec:"per manual"}], diyMin:45, difficulty:"medium", confidence:"general", source:"general guideline" },
+      { id:"ls-grease", title:"Grease wedge + beam", icon:"i-grease", interval:{hours:25}, parts:[], diyMin:10, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"ls-hoses", title:"Inspect hoses + fittings", icon:"i-wrench", interval:{months:12}, parts:[], diyMin:10, difficulty:"easy", confidence:"general", source:"general guideline" }
+    ],
+    "chainsaw": [
+      { id:"cs-chain", title:"Chain sharpen + tension", icon:"i-blades", interval:{hours:5}, parts:[], diyMin:20, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"cs-air", title:"Air filter clean", icon:"i-filter", interval:{hours:25}, parts:[], diyMin:10, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"cs-plug", title:"Spark plug", icon:"i-plug", interval:{months:12}, parts:[{type:"spark plug",spec:"per manual"}], diyMin:15, difficulty:"easy", confidence:"general", source:"general guideline" }
+    ],
+    "snowblower": [
+      { id:"sb-oil", title:"Engine oil", icon:"i-oil", interval:{months:12}, first:{hours:5, note:"break-in change"}, parts:[{type:"oil",spec:"5W-30"}], diyMin:20, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"sb-belt", title:"Belt + auger inspection", icon:"i-belt", interval:{months:12}, parts:[], diyMin:30, difficulty:"medium", confidence:"general", source:"general guideline" },
+      { id:"sb-prep", title:"Pre-season prep", icon:"i-sun", interval:{months:12}, parts:[{type:"fuel stabilizer",spec:"per label"}], diyMin:30, difficulty:"easy", confidence:"general", source:"general guideline" }
+    ],
+    "push-mower": [
+      { id:"pm-oil", title:"Engine oil", icon:"i-oil", interval:{hours:50, months:12}, first:{hours:5, note:"break-in change"}, parts:[{type:"oil",spec:"10W-30"}], diyMin:15, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"pm-blade", title:"Sharpen blade", icon:"i-blades", interval:{hours:25}, parts:[], diyMin:30, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"pm-air", title:"Air filter", icon:"i-filter", interval:{months:12}, parts:[], diyMin:10, difficulty:"easy", confidence:"general", source:"general guideline" }
+    ],
+    "trailer": [
+      { id:"tr2-bearings", title:"Wheel bearings grease", icon:"i-grease", interval:{miles:10000, months:12}, parts:[], diyMin:60, difficulty:"medium", confidence:"general", source:"general guideline" },
+      { id:"tr2-tires", title:"Tires + spare inspection", icon:"i-tire", interval:{months:12}, parts:[], diyMin:15, difficulty:"easy", confidence:"general", source:"general guideline" },
+      { id:"tr2-lights", title:"Lights + brakes check", icon:"i-wrench", interval:{months:12}, parts:[], diyMin:15, difficulty:"easy", confidence:"general", source:"general guideline" }
+    ],
+    "other": [
+      { id:"o-gen", title:"General service", icon:"i-wrench", interval:{months:12}, parts:[], diyMin:30, difficulty:"easy", confidence:"general", source:"general guideline" }
+    ]
+  },
+  /* model-specific overrides: matched on make+model (+year where it matters) */
+  models: [
+    { make:"cub cadet", model:"xt1", overrides:[
+        { id:"rm-oil", interval:{hours:50, months:12}, parts:[{type:"oil",spec:"10W-30, 2 qt"},{type:"oil filter",part:"Kohler 52 050 02-S (verify)"}], confidence:"general" }
+      ], note:"Cub Cadet XT1 Enduro series — general guideline intervals" },
+    { make:"predator", model:"3500", overrides:[
+        { id:"gen-oil", interval:{hours:100, months:6}, first:{hours:30, note:"break-in change per manual"}, confidence:"general" }
+      ], note:"Predator 3500 inverter generator" },
+    { make:"honda", model:"eu2200i", overrides:[
+        { id:"gen-oil", interval:{hours:100, months:6}, first:{hours:20, note:"break-in change per manual"}, confidence:"general" }
+      ], note:"Honda EU2200i" },
+    { make:"ford", model:"f-150", overrides:[
+        { id:"t-oil", interval:{miles:7500, months:6}, confidence:"general" }
+      ], note:"Ford F-150 (gas)" },
+    { make:"kawasaki", model:"ninja 400", overrides:[
+        { id:"m-oil", interval:{miles:7600, months:12}, confidence:"general" }
+      ], note:"Kawasaki Ninja 400" },
+    { make:"kubota", model:"bx", overrides:[
+        { id:"tr-oil", interval:{hours:200, months:12}, confidence:"general" }
+      ], note:"Kubota BX series" },
+    { make:"john deere", model:"1025r", overrides:[
+        { id:"tr-oil", interval:{hours:200, months:12}, confidence:"general" }
+      ], note:"John Deere 1-series" }
+  ],
+  seasonal: {
+    "riding-mower": {
+      spring:[ "Check tire pressure","Inspect blades and deck belt","Change engine oil if due","Charge / test battery","Check fuel lines and filter" ],
+      winter:[ "Add fuel stabilizer and run engine","Clean deck and underbody","Remove battery — store on tender","Fog cylinder (per manual)","Cover and store dry" ]
+    },
+    "generator": {
+      spring:[ "Change oil if due","Inspect air filter and spark plug","Check fuel lines","Run 20 min under load","Top off fuel with stabilizer" ],
+      winter:[ "Full fuel tank + stabilizer","Run dry or fog engine","Store covered and dry","Monthly exercise run reminder" ]
+    },
+    "pressure-washer": {
+      spring:[ "Check inlet filter and O-rings","Inspect hoses for cracks","Change pump oil if due","Test trigger and nozzle spray" ],
+      winter:[ "Flush pump with pump saver antifreeze","Drain hoses completely","Store above freezing" ]
+    },
+    "truck": {
+      spring:[ "Swap / inspect tires","Check fluids and belts","Test A/C","Wiper blades" ],
+      winter:[ "Check antifreeze strength","Test battery","Winter wiper blades","Emergency kit in cab" ]
+    },
+    "motorcycle": {
+      spring:[ "Fresh fuel, check tire pressure","Chain clean and lube","Brake check","Oil if due" ],
+      winter:[ "Fuel stabilizer","Battery tender","Cover and lift off tires" ]
+    }
+  }
+};
+function templatesFor(category, make, model){
+  const base = (DB.templates[category]||DB.templates.other).map(t => JSON.parse(JSON.stringify(t)));
+  const mk = (make||"").toLowerCase(), md = (model||"").toLowerCase();
+  for(const m of DB.models){
+    if(mk.includes(m.make) && (md.includes(m.model) || m.model.includes(md) || md==="")){
+      for(const ov of m.overrides){
+        const t = base.find(x=>x.id===ov.id);
+        if(t){ Object.assign(t, ov); }
+      }
+    }
+  }
+  return base;
+}
+</script>
+<script>
+/* ================= state ================= */
+let S = null;          // full app state
+let route = { view:"garage" };  // {view, machineId, taskId, tab, ...}
+let lastUndo = null;
+function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(S)); }
+function load(){
+  try{ const raw = localStorage.getItem(STORE_KEY); if(raw){ S = JSON.parse(raw); return; } }catch(e){}
+  S = seedState(); save();
+}
+function seedState(){
+  const t = todayStr();
+  const m1 = uid(), m2 = uid(), m3 = uid();
+  const machines = [
+    { id:m1, name:"CUB CADET XT1", category:"riding-mower", make:"Cub Cadet", model:"XT1 Enduro", year:"2021", unit:"hours", current:214, purchaseDate:"2021-04-10", notes:"", photoHue:46, archived:false, createdAt:t, severe:false },
+    { id:m2, name:"PREDATOR 3500", category:"generator", make:"Predator", model:"3500", year:"2022", unit:"hours", current:96, purchaseDate:"2022-09-03", notes:"", photoHue:8, archived:false, createdAt:t, severe:false },
+    { id:m3, name:"F-150", category:"truck", make:"Ford", model:"F-150", year:"2018", unit:"miles", current:112340, purchaseDate:"2019-06-01", notes:"", photoHue:210, archived:false, createdAt:t, severe:false }
+  ];
+  const items = [];
+  function mkItem(mid, tid, title, ic, iv, ld){
+    const it = { id:uid(), machineId:mid, templateId:tid, title, icon:ic, interval:iv, first:null,
+      lastReading:ld.r, lastDate:ld.d, reminderLead:ld.lead||null, enabled:true, parts:ld.parts||[],
+      howTo:ld.howTo||"", notes:"", snoozedUntil:null, severe:ld.severe||false, skipped:0 };
+    items.push(it); return it;
+  }
+  // Cub Cadet XT1 @214 hrs — oil: last 167, interval 50 -> 3 hrs left (Figma row 2)
+  mkItem(m1,"rm-oil","Engine oil + filter","i-oil",{hours:50,months:12},{r:167,d:addDays(t,-61),parts:[{type:"oil",spec:"10W-30, 2 qt"},{type:"oil filter",part:"Kohler 52 050 02-S"}]});
+  // blades: last 182, interval 25 -> overdue 7 hrs (Figma red card)
+  mkItem(m1,"rm-blades","Sharpen / balance blades","i-blades",{hours:25},{r:182,d:addDays(t,-40)});
+  mkItem(m1,"rm-air","Air filter clean / replace","i-filter",{hours:100,months:12},{r:150,d:addDays(t,-120)});
+  mkItem(m1,"rm-plug","Spark plug","i-plug",{hours:100,months:24},{r:150,d:addDays(t,-120)});
+  // Predator 3500 @96 hrs — oil: last 56, interval 50 -> 10 hrs left (Figma row 3)
+  mkItem(m2,"gen-oil","Engine oil","i-oil",{hours:50,months:6},{r:56,d:addDays(t,-45),parts:[{type:"oil",spec:"10W-30, 0.6 qt"}]});
+  mkItem(m2,"gen-air","Air filter","i-filter",{hours:200,months:12},{r:0,d:addDays(t,-400)});
+  mkItem(m2,"gen-exercise","Monthly exercise run","i-fuel",{months:1},{r:null,d:addDays(t,-22)});
+  // F-150 @112340 — oil last 108900, 7500/6mo
+  mkItem(m3,"t-oil","Oil + filter","i-oil",{miles:7500,months:6},{r:108900,d:addDays(t,-60),parts:[{type:"oil",spec:"5W-30 synthetic"},{type:"oil filter",part:"Motorcraft FL-500S"}]});
+  mkItem(m3,"t-rotate","Tire rotation","i-tire",{miles:7500},{r:105200,d:addDays(t,-160)});
+  mkItem(m3,"t-air","Engine air filter","i-filter",{miles:30000,months:36},{r:95000,d:addDays(t,-500)});
+  const logs = [
+    { id:uid(), machineId:m1, scheduleItemId:items[0].id, date:addDays(t,-61), reading:167, title:"Engine oil + filter", parts:[{name:"Oil 10W-30 2qt",cost:14},{name:"Filter",cost:9}], laborCost:0, shop:"DIY", total:23, notes:"", receiptIds:[], createdAt:t },
+    { id:uid(), machineId:m2, scheduleItemId:items[4].id, date:addDays(t,-45), reading:56, title:"Engine oil", parts:[{name:"Oil 10W-30",cost:7}], laborCost:0, shop:"DIY", total:7, notes:"", receiptIds:[], createdAt:t },
+    { id:uid(), machineId:m3, scheduleItemId:items[7].id, date:addDays(t,-60), reading:108900, title:"Oil + filter", parts:[{name:"Oil + filter",cost:52}], laborCost:0, shop:"DIY", total:52, notes:"", receiptIds:[], createdAt:t }
+  ];
+  const readings = [
+    { id:uid(), machineId:m1, value:167, date:addDays(t,-61) }, { id:uid(), machineId:m1, value:183, date:addDays(t,-40) }, { id:uid(), machineId:m1, value:201, date:addDays(t,-20) }, { id:uid(), machineId:m1, value:214, date:addDays(t,-2) },
+    { id:uid(), machineId:m2, value:56, date:addDays(t,-45) }, { id:uid(), machineId:m2, value:79, date:addDays(t,-15) }, { id:uid(), machineId:m2, value:96, date:addDays(t,-3) },
+    { id:uid(), machineId:m3, value:108900, date:addDays(t,-60) }, { id:uid(), machineId:m3, value:110500, date:addDays(t,-30) }, { id:uid(), machineId:m3, value:112340, date:addDays(t,-2) }
+  ];
+  return {
+    dbVersion: DB_VERSION, onboarded:false,
+    machines, items, logs,
+    readings,
+    receipts: [],
+    warranties: [ { id:uid(), machineId:m2, provider:"Harbor Freight", coverage:"2-yr extended", start:addDays(t,-700), end:addDays(t,21), usageLimit:null, policy:"", receiptId:null, notes:"" } ],
+    notes: [ { id:uid(), machineId:m1, body:"Deck vibrates at full throttle — check blade balance next sharpen.", date:addDays(t,-6), linkedId:null, pinned:true } ],
+    parts: [
+      { id:uid(), machineId:m1, type:"oil", spec:"10W-30 conventional, 2 qt", part:"", store:"" },
+      { id:uid(), machineId:m1, type:"oil filter", spec:"", part:"Kohler 52 050 02-S", store:"" },
+      { id:uid(), machineId:m2, type:"oil", spec:"10W-30, 0.6 qt", part:"", store:"" },
+      { id:uid(), machineId:m3, type:"oil", spec:"5W-30 synthetic", part:"", store:"" },
+      { id:uid(), machineId:m3, type:"oil filter", spec:"", part:"Motorcraft FL-500S", store:"" }
+    ],
+    fuel: [
+      { id:uid(), machineId:m3, date:addDays(t,-30), reading:110500, gallons:24.1, price:3.09, total:74.47, full:true },
+      { id:uid(), machineId:m3, date:addDays(t,-12), reading:111760, gallons:23.4, price:3.15, total:73.71, full:true },
+      { id:uid(), machineId:m3, date:addDays(t,-2), reading:112340, gallons:21.9, price:3.19, total:69.86, full:true }
+    ],
+    renewals: [],
+    settings: { unitSys:"imperial", defaultLeadDays:14, notifyTime:"07:00", lastBackup:null, fuelUnit:"gal" }
+  };
+}
+
+/* ================= due engine ================= */
+function machineById(id){ return S.machines.find(m=>m.id===id); }
+function itemsFor(mid){ return S.items.filter(i=>i.machineId===mid && i.enabled); }
+function readingsFor(mid){ return S.readings.filter(r=>r.machineId===mid).sort((a,b)=>a.date<b.date?-1:1); }
+
+function effInterval(item, machine){
+  // severe-duty toggle swaps in the severe interval when the template defines one
+  let iv = JSON.parse(JSON.stringify(item.interval||{}));
+  if(item.severe && item.severeInterval) iv = JSON.parse(JSON.stringify(item.severeInterval));
+  return iv;
+}
+/* returns {status:'ok'|'soon'|'over', pct, remainingTxt, etaDate, dueReading, dueDate} */
+function itemStatus(item, machine){
+  const iv = effInterval(item, machine);
+  const cur = machine.current;
+  const leadDays = item.reminderLeadDays!=null ? item.reminderLeadDays : S.settings.defaultLeadDays;
+  let usagePct=0, usageLeft=null, usageUnit=null, usageDue=null;   // fraction of usage interval consumed
+  let timePct=0, timeLeftDays=null, timeDue=null;
+  const useKey = Object.keys(iv).find(k=>k==="hours"||k==="miles"||k==="km");
+  if(useKey && iv[useKey] && item.lastReading!=null){
+    const span = iv[useKey], used = cur - item.lastReading;
+    usagePct = Math.max(0, used/span);
+    const left = span - used;
+    usageLeft = left; usageUnit = useKey; usageDue = item.lastReading + span;
+  }
+  if(iv.months && item.lastDate){
+    const dueD = addMonths(item.lastDate, iv.months);
+    const totalDays = daysBetween(item.lastDate, dueD);
+    const el = daysBetween(item.lastDate, todayStr());
+    timePct = totalDays>0 ? el/totalDays : 1;
+    timeLeftDays = daysBetween(todayStr(), dueD); timeDue = dueD;
+  }
+  if(item.first && item.first.done!==true && item.firstHoursOrMiles!=null){
+    // break-in rule handled as an extra usage gate
+  }
+  const pct = Math.max(usagePct, timePct);
+  // snooze
+  const snoozed = item.snoozedUntil && daysBetween(todayStr(), item.snoozedUntil) >= 0;
+  let status = "ok";
+  if(pct >= 1) status = "over";
+  else{
+    const usageNear = usageLeft!=null && usageLeft <= (iv[useKey]||0)*0.25;
+    const timeNear = timeLeftDays!=null && timeLeftDays <= leadDays;
+    if(usageNear || timeNear) status = "soon";
+  }
+  // eta from recent usage rate
+  let etaDate=null, rateTxt=null, etaUses=null;
+  const rs = readingsFor(machine.id);
+  if(rs.length>=2){
+    const a=rs[rs.length-2], b=rs[rs.length-1];
+    const dDays = Math.max(1, daysBetween(a.date,b.date)), dUse = Math.max(0, b.value-a.value);
+    const perDay = dUse/dDays;
+    if(perDay>0 && usageLeft!=null && usageLeft>0){
+      const days = usageLeft/perDay;
+      etaDate = addDays(todayStr(), Math.round(days));
+      const usesLabel = (DB.categories[machine.category]||{}).usesLabel || "use";
+      const avgSession = dUse/1; etaUses = Math.max(1, Math.ceil(usageLeft/Math.max(0.5,avgSession)));
+      rateTxt = `In ~${etaUses} ${usesLabel}${etaUses>1?"s":""} or ${Math.round(usageLeft)} ${UNIT_LABEL[usageUnit]||usageUnit}`;
+    } else if(perDay<=0 && usageLeft!=null && usageLeft>0){
+      rateTxt = `${Math.round(usageLeft)} ${UNIT_LABEL[usageUnit]||usageUnit} left`;
+    }
+  } else if(usageLeft!=null && usageLeft>0){
+    rateTxt = `${Math.round(usageLeft)} ${UNIT_LABEL[usageUnit]||usageUnit} left`;
+  }
+  if(timeLeftDays!=null){
+    if(timeLeftDays<0){ status="over"; rateTxt = `Overdue by ${-timeLeftDays}d`; }
+    else if(status!=="over" && rateTxt && timeDue && etaDate && timeDue<etaDate){ rateTxt = `${rateTxt} · ${fmtDate(timeDue)}`; }
+    else if(!rateTxt){ rateTxt = timeLeftDays===0 ? "Due today" : `Due ${fmtDate(timeDue)}`; }
+  }
+  if(status==="over" && usageLeft!=null && usageLeft<=0 && timeLeftDays>=0){
+    rateTxt = `Overdue by ${Math.round(-usageLeft)} ${UNIT_LABEL[usageUnit]||usageUnit}`;
+  }
+  if(snoozed && status==="over") status = "soon"; // snoozed hides the red card
+  return { status, pct:Math.min(1,pct), remainingTxt:rateTxt||"—", etaDate, dueReading:usageDue, dueDate:timeDue, snoozed };
+}
+function urgencyRank(st){ return st.status==="over"?0:st.status==="soon"?1:2; }
+function allUpcoming(){
+  const out=[];
+  for(const it of S.items){ if(!it.enabled) continue; const m=machineById(it.machineId); if(!m||m.archived) continue;
+    out.push({ item:it, machine:m, st:itemStatus(it,m) }); }
+  out.sort((a,b)=> urgencyRank(a.st)-urgencyRank(b.st) || b.st.pct-a.st.pct);
+  return out;
+}
+function lastDoneTxt(item, machine){
+  if(item.lastReading==null && !item.lastDate) return "Never logged";
+  const u = UNIT_LABEL[machine.unit] ? ` · ${item.lastReading} ${UNIT_LABEL[machine.unit]}` : "";
+  return `Last done ${fmtDate(item.lastDate)}${item.lastReading!=null?u:""}`;
+}
+function machineWorstStatus(m){
+  const items = itemsFor(m.id);
+  let worst="ok";
+  for(const it of items){ const st=itemStatus(it,m).status; if(st==="over") return "over"; if(st==="soon") worst="soon"; }
+  return worst;
+}
+</script>
+<script>
+/* ================= machine art (simple inline SVG illustrations) ================= */
+function machineArt(m, w, h){
+  const hue = m.photoHue!=null?m.photoHue:200;
+  const cat = m.category;
+  let inner = "";
+  if(cat==="riding-mower"||cat==="push-mower"){
+    inner = `<rect x="18" y="46" width="90" height="16" rx="8" fill="hsl(${hue},85%,52%)"/><rect x="34" y="28" width="34" height="20" rx="4" fill="hsl(${hue},80%,42%)"/><rect x="86" y="34" width="14" height="6" rx="3" fill="#222"/><circle cx="44" cy="66" r="11" fill="#111" stroke="#666" stroke-width="2"/><circle cx="92" cy="68" r="8" fill="#111" stroke="#666" stroke-width="2"/>`;
+  } else if(cat==="generator"){
+    inner = `<rect x="26" y="30" width="80" height="44" rx="6" fill="hsl(${hue},80%,42%)"/><rect x="26" y="44" width="80" height="8" fill="hsl(${hue},70%,32%)"/><circle cx="46" cy="80" r="8" fill="#111" stroke="#666" stroke-width="2"/><circle cx="86" cy="80" r="8" fill="#111" stroke="#666" stroke-width="2"/><rect x="40" y="36" width="24" height="6" rx="3" fill="#111"/>`;
+  } else if(cat==="truck"){
+    inner = `<rect x="10" y="42" width="104" height="22" rx="5" fill="hsl(${hue},60%,45%)"/><rect x="70" y="28" width="30" height="16" rx="3" fill="hsl(${hue},55%,38%)"/><rect x="76" y="31" width="22" height="9" rx="2" fill="#9fc4dd"/><circle cx="36" cy="68" r="11" fill="#111" stroke="#666" stroke-width="2"/><circle cx="92" cy="68" r="11" fill="#111" stroke="#666" stroke-width="2"/>`;
+  } else if(cat==="motorcycle"){
+    inner = `<circle cx="36" cy="66" r="12" fill="none" stroke="#888" stroke-width="3"/><circle cx="96" cy="66" r="12" fill="none" stroke="#888" stroke-width="3"/><path d="M36 66 L60 44 L84 66 M60 44 L52 30 L72 30" stroke="hsl(${hue},70%,50%)" stroke-width="5" fill="none" stroke-linecap="round"/>`;
+  } else if(cat==="pressure-washer"){
+    inner = `<rect x="40" y="40" width="52" height="34" rx="6" fill="hsl(${hue},70%,45%)"/><circle cx="52" cy="80" r="7" fill="#111"/><circle cx="80" cy="80" r="7" fill="#111"/><path d="M92 52 l18 -10" stroke="#888" stroke-width="4" stroke-linecap="round"/>`;
+  } else {
+    inner = `<rect x="30" y="36" width="72" height="40" rx="8" fill="hsl(${hue},60%,42%)"/><circle cx="50" cy="80" r="8" fill="#111" stroke="#666" stroke-width="2"/><circle cx="82" cy="80" r="8" fill="#111" stroke="#666" stroke-width="2"/><rect x="56" y="24" width="10" height="16" rx="2" fill="#888"/>`;
+  }
+  return `<svg viewBox="0 0 132 92" style="width:${w||"118px"};height:${h||"74px"}">${inner}</svg>`;
+}
+
+/* ================= shell ================= */
+const TABS = [
+  { id:"garage", label:"Garage", ic:"i-garage" },
+  { id:"schedule", label:"Schedule", ic:"i-sched" },
+  { id:"profile", label:"Profile", ic:"i-user" }
+];
+function renderShell(){
+  $("#tabbar").innerHTML = TABS.map(t=>`<button data-tab="${t.id}" class="${route.view===t.id?"active":""}"><svg><use href="#${t.ic}"/></svg>${t.label}</button>`).join("");
+  $$("#tabbar button").forEach(b=>b.onclick=()=>go(b.dataset.tab));
+}
+function go(view, params){
+  route = Object.assign({view}, params||{});
+  render();
+  $("#app").scrollTop=0; window.scrollTo(0,0);
+}
+function render(){
+  renderShell();
+  const app = $("#app");
+  if(route.view==="garage") app.innerHTML = viewGarage();
+  else if(route.view==="machine") app.innerHTML = viewMachine();
+  else if(route.view==="task") app.innerHTML = viewTask();
+  else if(route.view==="schedule") app.innerHTML = viewSchedule();
+  else if(route.view==="profile") app.innerHTML = viewProfile();
+  else if(route.view==="search") app.innerHTML = viewSearch();
+  bindCommon(app);
+}
+
+/* ================= GARAGE (home) ================= */
+function viewGarage(){
+  const machines = S.machines.filter(m=>!m.archived);
+  const up = allUpcoming();
+  let h = `<div class="topbar"><div class="garage-title">BILL'S GARAGE</div>
+    <div style="display:flex;gap:10px">
+      <button class="round-btn" onclick="go('search')" aria-label="Search" style="font-size:0">${icon("i-search")}</button>
+      <button class="round-btn" onclick="openAddMenu(null)" aria-label="Add">+</button>
+    </div></div>`;
+  // carousel
+  h += `<div class="carousel">`;
+  for(const m of machines){
+    const worst = machineWorstStatus(m);
+    const chips = itemsFor(m.id).map(it=>({it,st:itemStatus(it,m)})).filter(x=>x.st.status!=="ok").slice(0,3);
+    h += `<button class="machine-card" onclick="go('machine',{machineId:'${m.id}',tab:'upcoming'})">
+      <div class="art" style="background:radial-gradient(circle at 50% 35%, hsla(${m.photoHue},60%,35%,.55), transparent 75%)">${machineArt(m)}</div>
+      <div class="mname">${esc(m.name)}</div>
+      <div class="mread">${m.current!=null?m.current+" "+(UNIT_LABEL[m.unit]||""):""}</div>
+      <div class="chips">${chips.map(c=>`<span class="chip ${c.st.status==="over"?"over":"warn"}">${icon(c.it.icon)} ${esc(shortTitle(c.it.title))}</span>`).join("")||`<span class="chip ok">${icon("i-check")} All good</span>`}</div>
+    </button>`;
+  }
+  h += `<button class="add-card" onclick="startAddMachine()"><span class="round-btn">+</span>Add machine</button></div>`;
+  // stale reading nudge
+  for(const m of machines){
+    const rs = readingsFor(m.id);
+    const lastR = rs[rs.length-1];
+    if(lastR && daysBetween(lastR.date, todayStr()) >= 14){
+      h += `<div class="nudge"><div class="nt"><b>Update ${esc(m.name)} ${m.unit==="hours"?"hours":"odometer"}?</b><span>No reading in ${daysBetween(lastR.date,todayStr())} days — estimates drift without it.</span></div><button class="log-btn small" onclick="openReadingPad('${m.id}')">Update</button></div>`;
+    }
+  }
+  // warranty expiring
+  const soonW = S.warranties.filter(w=>{ const m=machineById(w.machineId); return m&&!m.archived&&w.end&&daysBetween(todayStr(),w.end)>=0&&daysBetween(todayStr(),w.end)<=30; });
+  for(const w of soonW){
+    const m = machineById(w.machineId);
+    h += `<div class="warranty-card"><b>Warranty ends in ${daysBetween(todayStr(),w.end)} days — ${esc(m.name)}</b><span>${esc(w.provider)} · ${esc(w.coverage)} · ends ${fmtDateLong(w.end)}</span></div>`;
+  }
+  h += `<div class="section-title">Upcoming maintenance</div><div class="list">`;
+  if(!up.length) h += `<div class="empty-card"><b>Nothing scheduled</b>Add a machine and its maintenance schedule to get started.</div>`;
+  for(const u of up.slice(0,12)){
+    h += upcomingRow(u);
+  }
+  if(up.length>12) h += `<button class="btn-secondary" onclick="go('schedule')">See all ${up.length} items</button>`;
+  h += `</div><div class="disclaimer">Intervals marked “general guideline” are starting points — check your owner's manual.</div>`;
+  return h;
+}
+function shortTitle(t){ return t.replace(/ \/.*$/,"").replace(/ clean \/ replace/i,""); }
+function upcomingRow(u){
+  const {item:m2, machine, st} = u;
+  const pct = Math.round(st.pct*100);
+  const bar = st.status==="over"?"over":st.status==="soon"?"warn":"";
+  if(st.status==="over" && !st.snoozed){
+    return `<div class="mrow overdue">
+      <div class="r1"><span class="chip over">${icon(m2.icon)} ${esc(shortTitle(m2.title))}</span></div>
+      <div class="mtitle" style="margin-top:10px;font-size:22px">${esc(machine.name)}</div>
+      <div class="due" style="text-align:center">Overdue — ${esc(st.remainingTxt.replace("Overdue by ",""))}</div>
+      <div class="big-log">
+        <button class="log-btn" onclick="openQuickLog('${m2.id}')">Log</button>
+        <div class="icon-actions">
+          <button class="icon-btn" onclick="snoozeItem('${m2.id}')" aria-label="Snooze" title="Snooze">${icon("i-snooze")}</button>
+          <button class="icon-btn" onclick="markDoneQuick('${m2.id}')" aria-label="Mark done" title="Mark done">${icon("i-check")}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  const dueTxt = st.status==="soon" ? `<span style="color:var(--yellow);font-weight:700">Due soon</span> — ` : "";
+  return `<div class="mrow">
+    <div class="r1"><span class="chip ${st.status==="soon"?"warn":""}">${icon(m2.icon)} ${esc(shortTitle(m2.title))}</span></div>
+    <div class="mtitle" style="margin-top:8px">${esc(machine.name)}</div>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:8px">
+      <div style="flex:1"><div class="due">${dueTxt}${esc(st.remainingTxt)}</div>
+      <div class="lastdone">${esc(lastDoneTxt(m2, machine))}</div>
+      <div class="progress"><i class="${bar}" style="width:${pct}%"></i></div></div>
+      <div class="icon-actions">
+        <button class="icon-btn" onclick="openQuickLog('${m2.id}')" aria-label="Log ${esc(m2.title)}" title="Log">${icon("i-check")}</button>
+        <button class="icon-btn" onclick="snoozeItem('${m2.id}')" aria-label="Snooze" title="Snooze">${icon("i-snooze")}</button>
+      </div>
+    </div>
+    <button class="btn-text" style="margin-top:6px;padding-left:0" onclick="go('task',{taskId:'${m2.id}'})">Details</button>
+  </div>`;
+}
+
+/* ================= SCHEDULE ================= */
+function viewSchedule(){
+  const up = allUpcoming();
+  const groups = { over:[], week:[], month:[], later:[] };
+  for(const u of up){
+    const st = u.st;
+    if(st.status==="over") groups.over.push(u);
+    else{
+      const d = st.etaDate || st.dueDate;
+      const n = d ? daysBetween(todayStr(), d) : 999;
+      if(n<=7) groups.week.push(u); else if(n<=31) groups.month.push(u); else groups.later.push(u);
+    }
+  }
+  let h = `<div class="topbar"><div class="garage-title">SCHEDULE</div>
+    <button class="round-btn" onclick="exportAllICS()" aria-label="Export calendar" style="font-size:0">${icon("i-sched")}</button></div>`;
+  const secs = [["over","Overdue"],["week","This week"],["month","This month"],["later","Later"]];
+  let any=false;
+  for(const [k,label] of secs){
+    if(!groups[k].length) continue; any=true;
+    h += `<div class="group-label">${label}</div><div class="list">${groups[k].map(upcomingRow).join("")}</div>`;
+  }
+  if(!any) h += `<div class="empty-card" style="margin-top:20px"><b>All clear</b>Nothing scheduled right now.</div>`;
+  h += `<div style="padding:16px"><button class="btn-secondary" onclick="exportAllICS()">Export all upcoming as calendar file (.ics)</button></div>`;
+  return h;
+}
+
+/* ================= PROFILE ================= */
+function viewProfile(){
+  const yr = new Date().getFullYear();
+  const logsY = S.logs.filter(l=>l.date.startsWith(yr));
+  const spentY = logsY.reduce((a,l)=>a+Number(l.total||0),0);
+  const fuelY = S.fuel.filter(f=>f.date.startsWith(yr));
+  const fuelCostY = fuelY.reduce((a,f)=>a+Number(f.total||0),0);
+  let h = `<div class="topbar"><div class="garage-title">PROFILE</div></div>`;
+  h += `<div class="section-title">This year</div><div class="stat-grid">
+    <div class="stat"><div class="sv">${money(spentY)}</div><div class="sl">Maintenance + repairs</div></div>
+    <div class="stat"><div class="sv">${money(fuelCostY)}</div><div class="sl">Fuel</div></div></div>`;
+  h += `<div class="section-title">Cost per machine</div><div class="list">`;
+  for(const m of S.machines.filter(x=>!x.archived)){
+    const spent = S.logs.filter(l=>l.machineId===m.id&&l.date.startsWith(yr)).reduce((a,l)=>a+Number(l.total||0),0);
+    const rs = readingsFor(m.id);
+    let rate = "";
+    if(rs.length>=2 && m.current>rs[0].value){ const span = m.current-rs[0].value; if(span>0) rate = money(spent/span)+` /${UNIT_LABEL[m.unit]||"unit"}`; }
+    h += `<div class="mrow"><div class="r1"><span class="mtitle" style="text-align:left">${esc(m.name)}</span><b>${money(spent)}</b></div><div class="lastdone">${esc(rate)} · ${S.logs.filter(l=>l.machineId===m.id).length} services logged</div></div>`;
+  }
+  h += `</div>`;
+  // fuel & MPG for vehicles
+  const veh = S.machines.filter(m=>["truck","motorcycle","trailer"].includes(m.category)&&!m.archived&&S.fuel.some(f=>f.machineId===m.id));
+  if(veh.length){
+    h += `<div class="section-title">Fuel &amp; MPG</div>`;
+    for(const m of veh){
+      const fs = S.fuel.filter(f=>f.machineId===m.id).sort((a,b)=>a.date<b.date?-1:1);
+      const mpgs = [];
+      for(let i=1;i<fs.length;i++){ const g=fs[i].gallons; if(g>0) mpgs.push((fs[i].reading-fs[i-1].reading)/g); }
+      const avg = mpgs.length? (mpgs.reduce((a,b)=>a+b,0)/mpgs.length):null;
+      h += `<div class="panel"><div class="kv"><span class="k">${esc(m.name)}</span><span class="v">${avg?avg.toFixed(1)+" MPG":"—"}</span></div>
+        <div class="kv"><span class="k">Fill-ups logged</span><span class="v">${fs.length}</span></div>
+        <button class="btn-text" onclick="openFuelSheet('${m.id}')">Log fill-up</button></div>`;
+    }
+  }
+  h += `<div class="section-title">Backup &amp; export</div><div class="list">
+    <button class="menu-item" onclick="exportJSON()"><span class="ticon">${icon("i-wrench")}</span>Export backup (JSON)<span class="arr">›</span></button>
+    <button class="menu-item" onclick="document.getElementById('importFile').click()"><span class="ticon">${icon("i-receipt")}</span>Restore from backup<span class="arr">›</span></button>
+    <input type="file" id="importFile" accept=".json" style="display:none" onchange="importJSON(this)">
+    <button class="menu-item" onclick="exportCSV()"><span class="ticon">${icon("i-note")}</span>Export everything (CSV)<span class="arr">›</span></button>
+    <button class="menu-item" onclick="printReport()"><span class="ticon">${icon("i-sched")}</span>Service history report (print / PDF)<span class="arr">›</span></button>
+  </div>
+  <div class="disclaimer">Last backed up: ${S.settings.lastBackup?fmtDateLong(S.settings.lastBackup):"never"}. Your data stays on this device.</div>`;
+  h += `<div class="section-title">Settings</div><div class="panel">
+    <div class="kv"><span class="k">Remind me ahead by</span><span class="v">${S.settings.defaultLeadDays} days</span></div>
+    <div style="padding:8px 0"><div class="seg">${[7,14,30].map(d=>`<button class="${S.settings.defaultLeadDays===d?"active":""}" onclick="setLead(${d})">${d} days</button>`).join("")}</div></div>
+  </div>`;
+  h += `<div style="padding:16px"><button class="btn-danger" onclick="resetDemo()">Reset to demo data</button></div>`;
+  h += `<div class="disclaimer">Bill's Garage v1.0 · template DB v${DB_VERSION} · intervals are starting points — check your owner's manual.</div>`;
+  return h;
+}
+
+/* ================= SEARCH ================= */
+function viewSearch(){
+  const q = (route.q||"").toLowerCase();
+  let h = `<div class="detail-head"><button class="back" onclick="go('garage')" aria-label="Back">‹</button><h1>SEARCH</h1></div>
+  <div class="searchbar"><input id="q" placeholder="Search machines, notes, receipts…" value="${esc(route.q||"")}" oninput="goSilent(this.value)"></div><div class="list" style="margin-top:12px">`;
+  if(q){
+    const res = [];
+    for(const m of S.machines) if((m.name+m.make+m.model).toLowerCase().includes(q)) res.push(`<button class="mrow" onclick="go('machine',{machineId:'${m.id}',tab:'upcoming'})"><div class="r1"><span class="mtitle" style="text-align:left">${esc(m.name)}</span></div><div class="lastdone">${esc(m.make)} ${esc(m.model)}</div></button>`);
+    for(const n of S.notes) if(n.body.toLowerCase().includes(q)){ const m=machineById(n.machineId); res.push(`<button class="mrow" onclick="go('machine',{machineId:'${n.machineId}',tab:'notes'})"><div class="lastdone">${esc(m?m.name:"")}</div><div>${esc(n.body.slice(0,120))}</div></button>`); }
+    for(const r of S.receipts) if(((r.vendor||"")+(r.category||"")).toLowerCase().includes(q)){ const m=machineById(r.machineId); res.push(`<button class="mrow" onclick="go('machine',{machineId:'${r.machineId}',tab:'history'})"><div class="r1"><span class="mtitle" style="text-align:left">${esc(r.vendor||"Receipt")}</span><b>${money(r.total)}</b></div><div class="lastdone">${esc(m?m.name:"")} · ${fmtDateLong(r.date)}</div></button>`); }
+    for(const p of S.parts) if(((p.type||"")+(p.spec||"")+(p.part||"")).toLowerCase().includes(q)){ const m=machineById(p.machineId); res.push(`<button class="mrow" onclick="go('machine',{machineId:'${p.machineId}',tab:'upcoming'})"><div class="lastdone">${esc(m?m.name:"")} · part</div><div><b>${esc(p.type)}</b> — ${esc(p.spec)} ${esc(p.part)}</div></button>`); }
+    h += res.length? res.join("") : `<div class="empty-card"><b>No matches</b>Try another word.</div>`;
+  }
+  h += `</div>`;
+  return h;
+}
+function goSilent(v){ route.q=v; const el=$("#q"); const pos=el.selectionStart; render(); const n=$("#q"); n.focus(); n.setSelectionRange(pos,pos); }
+</script>
+<script>
+/* ================= MACHINE PAGE ================= */
+function viewMachine(){
+  const m = machineById(route.machineId);
+  if(!m) return `<div class="empty-card" style="margin-top:40px"><b>Machine not found</b></div>`;
+  const tab = route.tab||"upcoming";
+  let h = `<div class="detail-head"><button class="back" onclick="go('garage')" aria-label="Back">‹</button><h1>${esc(m.name)}</h1>
+    <button class="round-btn small" onclick="openMachineMenu('${m.id}')" aria-label="More">⋯</button></div>`;
+  h += `<div class="hero-art" style="background:radial-gradient(circle at 50% 40%, hsla(${m.photoHue},60%,32%,.6), transparent 78%)">${machineArt(m,"250px","130px")}</div>`;
+  h += `<div class="reading-box"><div><div class="val">${m.current!=null?m.current:"—"}</div><div class="lbl">${m.unit==="hours"?"Engine hours":m.unit==="miles"?"Miles":"Reading"}</div></div>
+    <button class="log-btn" onclick="openReadingPad('${m.id}')">Update</button></div>`;
+  h += `<div class="tabrow">${["upcoming","history","notes"].map(t=>`<button class="${tab===t?"active":""}" onclick="go('machine',{machineId:'${m.id}',tab:'${t}'})">${t[0].toUpperCase()+t.slice(1)}</button>`).join("")}</div>`;
+  if(tab==="upcoming"){
+    const items = itemsFor(m.id).map(it=>({it,st:itemStatus(it,m)}));
+    items.sort((a,b)=>urgencyRank(a.st)-urgencyRank(b.st)||b.st.pct-a.st.pct);
+    h += `<div class="list" style="margin-top:12px">${items.map(u=>upcomingRow({item:u.it,machine:m,st:u.st})).join("")||'<div class="empty-card"><b>No items</b></div>'}</div>`;
+    h += `<div style="padding:12px 16px 0"><button class="btn-secondary" onclick="openAddMaint('${m.id}')">Add maintenance item</button></div>`;
+    // spec sheet
+    const parts = S.parts.filter(p=>p.machineId===m.id);
+    h += `<div class="section-title small">Spec sheet</div><div class="panel">`;
+    h += parts.length? parts.map(p=>`<div class="kv"><span class="k">${esc(p.type)}</span><span class="v">${esc(p.spec||p.part||"—")}${p.part&&p.spec?`<br><span style="font-weight:400;color:var(--text-dim)">${esc(p.part)}</span>`:""}</span></div>`).join("") : `<div class="kv"><span class="k">No specs yet</span></div>`;
+    h += `<button class="btn-text" onclick="openSpecSheet('${m.id}')">Edit spec sheet</button></div>`;
+    // seasonal checklists
+    const sc = DB.seasonal[m.category];
+    if(sc) h += `<div class="section-title small">Seasonal checklists</div><div class="list">
+      <button class="menu-item" onclick="openChecklist('${m.id}','spring')"><span class="ticon">${icon("i-sun")}</span>Spring startup<span class="arr">›</span></button>
+      <button class="menu-item" onclick="openChecklist('${m.id}','winter')"><span class="ticon">${icon("i-snow")}</span>Winter storage<span class="arr">›</span></button></div>`;
+  } else if(tab==="history"){
+    const logs = S.logs.filter(l=>l.machineId===m.id).sort((a,b)=>a.date<b.date?1:-1);
+    const total = logs.reduce((a,l)=>a+Number(l.total||0),0);
+    h += `<div class="panel" style="margin-top:12px"><div class="kv"><span class="k">Total recorded</span><span class="v">${money(total)}</span></div><div class="kv"><span class="k">Services</span><span class="v">${logs.length}</span></div></div>`;
+    h += `<div class="list" style="margin-top:12px">`;
+    if(!logs.length) h += `<div class="empty-card"><b>No history yet</b>Log your first service.</div>`;
+    for(const l of logs){
+      h += `<div class="mrow"><div class="r1"><span class="mtitle" style="text-align:left;font-size:17px">${esc(l.title)}</span><b>${money(l.total)}</b></div>
+        <div class="lastdone">${fmtDateLong(l.date)}${l.reading!=null?` · ${l.reading} ${UNIT_LABEL[m.unit]||""}`:""} · ${esc(l.shop||"")}</div>
+        ${l.notes?`<div style="font-size:13px;margin-top:6px;color:var(--text-dim)">${esc(l.notes)}</div>`:""}
+        <div style="display:flex;gap:6px;margin-top:8px"><button class="btn-text" onclick="deleteLog('${l.id}')">Delete</button></div></div>`;
+    }
+    h += `</div>`;
+  } else {
+    const notes = S.notes.filter(n=>n.machineId===m.id).sort((a,b)=>(b.pinned-a.pinned)||(a.date<b.date?1:-1));
+    h += `<div class="list" style="margin-top:12px">`;
+    if(!notes.length) h += `<div class="empty-card"><b>No notes</b>Jot down anything about this machine.</div>`;
+    for(const n of notes){
+      h += `<div class="note-card">${n.pinned?'<div class="pin">PINNED</div>':""}<div>${esc(n.body)}</div><div class="ndate">${fmtDateLong(n.date)} · <button class="btn-text" style="padding:0;min-height:0" onclick="togglePin('${n.id}')">${n.pinned?"Unpin":"Pin"}</button> · <button class="btn-text" style="padding:0;min-height:0" onclick="deleteNote('${n.id}')">Delete</button></div></div>`;
+    }
+    h += `</div><div style="padding:12px 16px 0"><button class="btn-secondary" onclick="openNoteSheet('${m.id}')">Add note</button></div>`;
+  }
+  h += `<div style="padding:16px"><button class="round-btn" onclick="openAddMenu('${m.id}')" aria-label="Add" style="width:60px;height:60px;font-size:32px;margin:0 auto">+</button></div>`;
+  return h;
+}
+
+/* ================= TASK DETAIL ================= */
+function viewTask(){
+  const it = S.items.find(x=>x.id===route.taskId);
+  if(!it) return `<div class="empty-card" style="margin-top:40px"><b>Task not found</b></div>`;
+  const m = machineById(it.machineId);
+  const st = itemStatus(it,m);
+  const tpl = (DB.templates[m.category]||[]).find(t=>t.id===it.templateId);
+  const conf = tpl?tpl.confidence:"custom";
+  const logs = S.logs.filter(l=>l.scheduleItemId===it.id||l.title===it.title&&l.machineId===m.id).sort((a,b)=>a.date<b.date?1:-1);
+  let h = `<div class="detail-head"><button class="back" onclick="go('machine',{machineId:'${m.id}',tab:'upcoming'})" aria-label="Back">‹</button><h1>${esc(it.title.toUpperCase())}</h1>
+    <button class="round-btn small" onclick="openTaskMenu('${it.id}')" aria-label="Edit">✎</button></div>`;
+  h += `<div style="padding:0 16px"><span class="chip ${st.status==="over"?"over":st.status==="soon"?"warn":"ok"}">${icon(it.icon)} ${st.status==="over"?"Overdue":st.status==="soon"?"Due soon":"OK"}</span>
+    <span class="chip" style="margin-left:6px">${esc(conf==="general"?"general guideline":"custom")}</span></div>`;
+  h += `<div class="panel"><div class="kv"><span class="k">Next due</span><span class="v">${esc(st.remainingTxt)}</span></div>
+    <div class="progress" style="margin:6px 0 10px"><i class="${st.status==="over"?"over":st.status==="soon"?"warn":""}" style="width:${Math.round(st.pct*100)}%"></i></div>
+    <div class="kv"><span class="k">Interval</span><span class="v">${esc(intervalTxt(it,m))}</span></div>
+    <div class="kv"><span class="k">Last done</span><span class="v">${esc(lastDoneTxt(it,m))}</span></div></div>`;
+  // what you need
+  h += `<div class="section-title small">What you need</div>`;
+  const parts = it.parts&&it.parts.length?it.parts:(S.parts.filter(p=>p.machineId===m.id&&p.type&&it.title.toLowerCase().includes(p.type.split(" ")[0])));
+  h += `<div class="panel">`;
+  if(parts.length) h += parts.map(p=>`<div class="kv"><span class="k">${esc(p.type)}</span><span class="v">${esc(p.spec||"")}${p.part?`<br><button class="btn-text" style="padding:2px 0;min-height:0" onclick="copyTxt('${esc(p.part)}')">Copy part #: ${esc(p.part)}</button>`:""}</span></div>`).join("");
+  else h += `<div class="kv"><span class="k">Nothing listed</span></div>`;
+  h += `<button class="btn-text" onclick="openSpecSheet('${m.id}')">Edit spec sheet</button></div>`;
+  if(it.howTo) h += `<div style="padding:12px 16px 0"><a class="btn-secondary" style="text-decoration:none" href="${esc(it.howTo)}" target="_blank" rel="noopener">How-to guide</a></div>`;
+  h += `<div style="padding:12px 16px 0;display:flex;gap:10px"><button class="btn-secondary" onclick="openServiceSearch('${esc(m.category)}')">Find a shop nearby</button></div>`;
+  h += `<div class="section-title small">History for this task</div><div class="list">`;
+  h += logs.length? logs.map(l=>`<div class="mrow"><div class="r1"><span class="mtitle" style="text-align:left;font-size:16px">${fmtDateLong(l.date)}</span><b>${money(l.total)}</b></div><div class="lastdone">${l.reading!=null?l.reading+" "+(UNIT_LABEL[m.unit]||""):""} · ${esc(l.shop||"")}${l.notes?" — "+esc(l.notes):""}</div></div>`).join("") : `<div class="empty-card"><b>No history</b>Nothing logged for this task yet.</div>`;
+  h += `</div><div style="padding:16px"><button class="btn-primary" onclick="openQuickLog('${it.id}')">Log this service</button></div>`;
+  if(tpl) h += `<div class="disclaimer">Starting point — check your owner's manual. Source: ${esc(tpl.source||"general guideline")}.</div>`;
+  return h;
+}
+function intervalTxt(it,m){
+  const iv = effInterval(it,m);
+  const parts=[];
+  if(iv.miles) parts.push(`every ${iv.miles.toLocaleString()} mi`);
+  if(iv.km) parts.push(`every ${iv.km.toLocaleString()} km`);
+  if(iv.hours) parts.push(`every ${iv.hours} hrs`);
+  if(iv.months) parts.push(`every ${iv.months} mo`);
+  return parts.join(" or ") + (parts.length>1?" (whichever first)":"") + (it.severe?" · severe duty":"");
+}
+function copyTxt(t){ navigator.clipboard&&navigator.clipboard.writeText(t); toast("Copied: "+t); }
+</script>
+<script>
+/* ================= sheets ================= */
+let _sheetWired=false;
+function openSheet(html){
+  $("#sheet").innerHTML = `<div class="handle"></div>`+html;
+  $("#sheetWrap").classList.add("open");
+  if(!_sheetWired){ _sheetWired=true;
+    $("#sheet").addEventListener("click", e=>{
+      const b=e.target.closest(".seg button");
+      if(b){ b.parentElement.querySelectorAll("button").forEach(x=>x.classList.remove("active")); b.classList.add("active"); }
+    });
+  }
+  const first = $("#sheet input, #sheet select, #sheet textarea, #sheet button.btn-primary");
+  if(first) setTimeout(()=>{ try{first.focus({preventScroll:true})}catch(e){} },250);
+}
+function closeSheet(){ $("#sheetWrap").classList.remove("open"); }
+$("#sheetBg") && $("#sheetBg").addEventListener("click", closeSheet);
+document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeSheet(); });
+function toast(msg, undoFn){
+  const t=$("#toast"); $("#toastMsg").textContent=msg;
+  const b=$("#toastBtn");
+  if(undoFn){ b.style.display=""; b.onclick=()=>{ undoFn(); t.classList.remove("show"); }; lastUndo=undoFn; }
+  else { b.style.display="none"; }
+  t.classList.add("show");
+  clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"), 4200);
+}
+
+/* ================= quick log ================= */
+function openQuickLog(itemId){
+  const it = S.items.find(x=>x.id===itemId); const m = machineById(it.machineId);
+  const st = itemStatus(it,m);
+  const others = itemsFor(m.id).filter(o=>o.id!==it.id && itemStatus(o,m).status!=="ok");
+  const pred = st.dueReading!=null ? Math.round(Math.max(m.current||0, st.dueReading)) : (m.current||"");
+  openSheet(`<h2>Log service</h2><div class="sub">${esc(m.name)} · ${esc(it.title)}</div>
+    <div class="field"><label>Date</label><input type="date" id="ql-date" value="${todayStr()}"></div>
+    <div class="field"><label>${m.unit==="hours"?"Engine hours":"Odometer"} at service</label><input type="number" id="ql-reading" value="${pred}" inputmode="decimal"></div>
+    ${others.length?`<div class="field"><label>Also done now</label>${others.map(o=>`<button class="toggle-row" data-multi="${o.id}" onclick="this.classList.toggle('sel');this.querySelector('.check-dot').classList.toggle('on')"><span class="check-dot">✓</span><span class="tt"><b>${esc(o.title)}</b></span></button>`).join("")}</div>`:""}
+    <div class="field-row"><div class="field"><label>Parts cost</label><input type="number" id="ql-parts" inputmode="decimal" placeholder="0"></div>
+    <div class="field"><label>Labor cost</label><input type="number" id="ql-labor" inputmode="decimal" placeholder="0"></div></div>
+    <div class="field"><label>Shop</label><div class="seg" id="ql-shop"><button class="active" data-v="DIY">DIY</button><button data-v="Shop">Shop</button></div></div>
+    <div class="field"><label>Notes</label><textarea id="ql-notes" placeholder="Optional"></textarea></div>
+    <button class="btn-primary" onclick="saveQuickLog('${it.id}')">Save log</button>
+    <button class="btn-text" style="width:100%" onclick="closeSheet()">Cancel</button>
+    <script>$$("#ql-shop button").forEach(b=>b.onclick=()=>{$$("#ql-shop button").forEach(x=>x.classList.remove("active"));b.classList.add("active")})<\/script>`);
+}
+function saveQuickLog(itemId){
+  const it = S.items.find(x=>x.id===itemId); const m = machineById(it.machineId);
+  const date = $("#ql-date").value || todayStr();
+  const reading = $("#ql-reading").value===""?null:Number($("#ql-reading").value);
+  const parts = Number($("#ql-parts").value||0), labor = Number($("#ql-labor").value||0);
+  const shop = ($("#ql-shop .active")||{}).dataset?$("#ql-shop .active").dataset.v:"DIY";
+  const notes = $("#ql-notes").value;
+  const alsoIds = $$("#sheet [data-multi].sel").map(b=>b.dataset.multi);
+  const snapshot = JSON.stringify(S);
+  const ids = [it.id, ...alsoIds];
+  for(const id of ids){
+    const o = S.items.find(x=>x.id===id);
+    o.lastReading = reading!=null?reading:o.lastReading;
+    o.lastDate = date; o.snoozedUntil=null; o.skipped=0;
+  }
+  const log = { id:uid(), machineId:m.id, scheduleItemId:it.id, date, reading,
+    title: ids.length>1 ? ids.map(id=>S.items.find(x=>x.id===id).title).join(" + ") : it.title,
+    parts:[], laborCost:labor, shop, total:parts+labor, notes, receiptIds:[], createdAt:todayStr() };
+  S.logs.push(log);
+  if(reading!=null){ m.current = Math.max(m.current||0, reading); S.readings.push({id:uid(),machineId:m.id,value:reading,date}); }
+  save(); closeSheet();
+  const st = itemStatus(it,m);
+  toast(`Logged ✓  Next: ${st.remainingTxt}`, ()=>{ S=JSON.parse(snapshot); save(); render(); });
+  render();
+}
+function markDoneQuick(itemId){
+  const it = S.items.find(x=>x.id===itemId);
+  const snapshot = JSON.stringify(S);
+  it.lastReading = machineById(it.machineId).current;
+  it.lastDate = todayStr(); it.snoozedUntil=null;
+  S.logs.push({id:uid(),machineId:it.machineId,scheduleItemId:it.id,date:todayStr(),reading:it.lastReading,title:it.title,parts:[],laborCost:0,shop:"DIY",total:0,notes:"Quick mark-done",receiptIds:[],createdAt:todayStr()});
+  save(); render();
+  toast("Marked done ✓", ()=>{ S=JSON.parse(snapshot); save(); render(); });
+}
+function snoozeItem(itemId){
+  const it = S.items.find(x=>x.id===itemId);
+  openSheet(`<h2>Snooze</h2><div class="sub">${esc(it.title)}</div>
+    <div class="field-row"><button class="btn-secondary" onclick="doSnooze('${itemId}',1)">1 day</button>
+    <button class="btn-secondary" onclick="doSnooze('${itemId}',7)">1 week</button></div>
+    <div class="field" style="margin-top:12px"><label>Custom date</label><input type="date" id="sz-date" value="${addDays(todayStr(),7)}"></div>
+    <button class="btn-primary" onclick="doSnooze('${itemId}',null)">Snooze until date</button>
+    <button class="btn-text" style="width:100%" onclick="closeSheet()">Cancel</button>`);
+}
+function doSnooze(itemId,days){
+  const it = S.items.find(x=>x.id===itemId);
+  it.snoozedUntil = days==null ? ($("#sz-date").value||addDays(todayStr(),7)) : addDays(todayStr(),days);
+  save(); closeSheet(); render(); toast("Snoozed ✓");
+}
+function skipItem(itemId){
+  const it = S.items.find(x=>x.id===itemId);
+  const snapshot = JSON.stringify(S);
+  it.skipped = (it.skipped||0)+1;
+  it.lastDate = todayStr(); it.snoozedUntil=null;
+  S.logs.push({id:uid(),machineId:it.machineId,scheduleItemId:it.id,date:todayStr(),reading:it.lastReading,title:it.title+" (skipped)",parts:[],laborCost:0,shop:"—",total:0,notes:"Skipped this time",receiptIds:[],createdAt:todayStr()});
+  save(); render();
+  toast("Skipped — logged so history stays honest", ()=>{ S=JSON.parse(snapshot); save(); render(); });
+}
+function deleteLog(logId){
+  const i = S.logs.findIndex(l=>l.id===logId); if(i<0) return;
+  const snapshot = JSON.stringify(S);
+  const [gone] = S.logs.splice(i,1); save(); render();
+  toast("Log deleted", ()=>{ S=JSON.parse(snapshot); save(); render(); });
+}
+
+/* ================= reading pad ================= */
+function openReadingPad(mid){
+  const m = machineById(mid);
+  openSheet(`<h2>Update ${m.unit==="hours"?"hours":"odometer"}</h2><div class="sub">${esc(m.name)}</div>
+    <div class="pad-display" id="padVal">${m.current!=null?m.current:"0"}</div><div class="pad-unit">${UNIT_LABEL[m.unit]||""}</div>
+    <div class="pad">${[1,2,3,4,5,6,7,8,9,"C",0,"⌫"].map(k=>`<button onclick="padKey('${mid}','${k}')">${k}</button>`).join("")}</div>
+    <button class="btn-primary" onclick="padSave('${mid}')">Save</button>
+    <button class="btn-text" style="width:100%" onclick="closeSheet()">Cancel</button>`);
+  window._pad = String(m.current!=null?m.current:"");
+}
+function padKey(mid,k){
+  if(k==="C") window._pad="";
+  else if(k==="⌫") window._pad=window._pad.slice(0,-1);
+  else window._pad=(window._pad+k).slice(0,7);
+  $("#padVal").textContent = window._pad||"0";
+}
+function padSave(mid){
+  const m = machineById(mid);
+  const v = Number(window._pad||0);
+  m.current = v;
+  S.readings.push({id:uid(),machineId:mid,value:v,date:todayStr()});
+  save(); closeSheet(); render(); toast("Reading updated ✓");
+}
+
+/* ================= + menu ================= */
+function openAddMenu(mid){
+  const m = mid?machineById(mid):null;
+  openSheet(`<h2>Add</h2><div class="sub">${m?esc(m.name):"New"}</div>
+    ${m?`<button class="menu-item" onclick="closeSheet();openQuickLogForMachine('${m.id}')"><span class="ticon">${icon("i-check")}</span>Log service<span class="arr">›</span></button>`:""}
+    ${m?`<button class="menu-item" onclick="closeSheet();openAddMaint('${m.id}')"><span class="ticon">${icon("i-wrench")}</span>Maintenance item<span class="arr">›</span></button>`:""}
+    ${m?`<button class="menu-item" onclick="closeSheet();openReceiptSheet('${m.id}')"><span class="ticon">${icon("i-receipt")}</span>Receipt<span class="arr">›</span></button>`:""}
+    ${m?`<button class="menu-item" onclick="closeSheet();openWarrantySheet('${m.id}')"><span class="ticon">${icon("i-warranty")}</span>Warranty<span class="arr">›</span></button>`:""}
+    ${m?`<button class="menu-item" onclick="closeSheet();openNoteSheet('${m.id}')"><span class="ticon">${icon("i-note")}</span>Note<span class="arr">›</span></button>`:""}
+    ${m&&["truck","motorcycle"].includes(m.category)?`<button class="menu-item" onclick="closeSheet();openFuelSheet('${m.id}')"><span class="ticon">${icon("i-fuel")}</span>Fill-up<span class="arr">›</span></button>`:""}
+    <button class="menu-item" onclick="closeSheet();startAddMachine()"><span class="ticon">${icon("i-garage")}</span>Add machine<span class="arr">›</span></button>`);
+}
+function openQuickLogForMachine(mid){
+  const items = itemsFor(mid);
+  if(!items.length){ toast("No maintenance items on this machine yet"); return; }
+  openSheet(`<h2>Log service</h2><div class="sub">Pick what was done</div>
+    ${items.map(o=>`<button class="toggle-row" data-multi="${o.id}" onclick="this.classList.toggle('sel');this.querySelector('.check-dot').classList.toggle('on')"><span class="check-dot">✓</span><span class="tt"><b>${esc(o.title)}</b><span>${esc(lastDoneTxt(o,machineById(mid)))}</span></span></button>`).join("")}
+    <div class="field"><label>Date</label><input type="date" id="qlm-date" value="${todayStr()}"></div>
+    <div class="field"><label>${machineById(mid).unit==="hours"?"Engine hours":"Odometer"} at service</label><input type="number" id="qlm-reading" inputmode="decimal" value="${machineById(mid).current||""}"></div>
+    <div class="field"><label>Total cost</label><input type="number" id="qlm-cost" inputmode="decimal" placeholder="0"></div>
+    <button class="btn-primary" onclick="saveQuickLogMulti('${mid}')">Save log</button>
+    <button class="btn-text" style="width:100%" onclick="closeSheet()">Cancel</button>`);
+}
+function saveQuickLogMulti(mid){
+  const m = machineById(mid);
+  const ids = $$("#sheet [data-multi].sel").map(b=>b.dataset.multi);
+  if(!ids.length){ toast("Pick at least one item"); return; }
+  const date=$("#qlm-date").value||todayStr();
+  const reading=$("#qlm-reading").value===""?null:Number($("#qlm-reading").value);
+  const cost=Number($("#qlm-cost").value||0);
+  const snapshot=JSON.stringify(S);
+  for(const id of ids){ const o=S.items.find(x=>x.id===id); o.lastReading=reading!=null?reading:o.lastReading; o.lastDate=date; o.snoozedUntil=null; }
+  S.logs.push({id:uid(),machineId:mid,scheduleItemId:ids[0],date,reading,title:ids.map(id=>S.items.find(x=>x.id===id).title).join(" + "),parts:[],laborCost:0,shop:"DIY",total:cost,notes:"",receiptIds:[],createdAt:todayStr()});
+  if(reading!=null){ m.current=Math.max(m.current||0,reading); S.readings.push({id:uid(),machineId:mid,value:reading,date}); }
+  save(); closeSheet(); render();
+  toast("Logged ✓", ()=>{ S=JSON.parse(snapshot); save(); render(); });
+}
+</script>
+<script>
+/* ================= ADD MACHINE flow ================= */
+let AM = null; // draft
+function startAddMachine(){
+  AM = { step:1, category:"riding-mower", make:"", model:"", year:"", unit:"hours", current:"", severe:false, chosen:[], lastDone:{} };
+  renderAddMachine();
+}
+function renderAddMachine(){
+  const cats = Object.entries(DB.categories);
+  let body = "";
+  if(AM.step===1){
+    body = `<h2>Add machine</h2><div class="sub">Step 1 of 4 — What kind?</div>
+      <div class="seg">${cats.map(([k,c])=>`<button class="${AM.category===k?"active":""}" onclick="AM.category='${k}';AM.unit='${DB.categories[k].units[0]}';renderAddMachine()">${esc(c.label)}</button>`).join("")}</div>
+      <div style="height:16px"></div>
+      <button class="btn-primary" onclick="AM.step=2;renderAddMachine()">Next</button>`;
+  } else if(AM.step===2){
+    body = `<h2>Add machine</h2><div class="sub">Step 2 of 4 — Details</div>
+      ${["truck","motorcycle"].includes(AM.category)?`<button class="btn-secondary" style="margin-bottom:14px" onclick="vinDecode()">Scan / decode VIN</button><div class="field" id="vinField" style="display:none"><label>VIN</label><input id="am-vin" placeholder="17-character VIN" maxlength="17"></div>`:""}
+      <div class="field"><label>Make</label><input id="am-make" list="makes" value="${esc(AM.make)}" placeholder="e.g. Cub Cadet"><datalist id="makes">${[...new Set(DB.models.map(m=>m.make))].map(x=>`<option value="${x}">`).join("")}</datalist></div>
+      <div class="field-row"><div class="field"><label>Model</label><input id="am-model" value="${esc(AM.model)}" placeholder="e.g. XT1"></div>
+      <div class="field"><label>Year</label><input id="am-year" value="${esc(AM.year)}" inputmode="numeric" placeholder="2021"></div></div>
+      <div class="field"><label>Nickname (optional)</label><input id="am-name" placeholder="e.g. The Mower"></div>
+      <button class="btn-primary" onclick="amStep2Next()">Next</button>
+      <button class="btn-text" style="width:100%" onclick="AM.step=1;renderAddMachine()">Back</button>`;
+  } else if(AM.step===3){
+    const cat = DB.categories[AM.category];
+    body = `<h2>Add machine</h2><div class="sub">Step 3 of 4 — Current ${AM.unit==="hours"?"hours":"reading"}</div>
+      <div class="field"><label>Tracks</label><div class="seg">${cat.units.map(u=>`<button class="${AM.unit===u?"active":""}" onclick="AM.unit='${u}';renderAddMachine()">${u==="hours"?"Engine hours":u==="uses"?"Uses ("+cat.usesLabel+")":u}</button>`).join("")}</div></div>
+      <div class="field"><label>Current ${AM.unit==="hours"?"engine hours":"odometer"}</label><input id="am-cur" type="number" inputmode="decimal" value="${esc(AM.current)}" placeholder="0"></div>
+      <div class="field"><label>Normal or severe duty?</label><div class="seg"><button class="${!AM.severe?"active":""}" onclick="AM.severe=false;renderAddMachine()">Normal</button><button class="${AM.severe?"active":""}" onclick="AM.severe=true;renderAddMachine()">Severe (dusty, towing, short trips)</button></div></div>
+      <button class="btn-primary" onclick="amStep3Next()">Next</button>
+      <button class="btn-text" style="width:100%" onclick="AM.step=2;renderAddMachine()">Back</button>`;
+  } else {
+    // suggested schedule
+    if(!AM.chosen.length){ AM.chosen = templatesFor(AM.category, AM.make, AM.model).map(t=>({t, on:true})); }
+    body = `<h2>Suggested maintenance</h2><div class="sub">Step 4 of 4 — ${esc(AM.make)} ${esc(AM.model)} · starting points, check your manual</div>
+      ${AM.chosen.map((c,i)=>{ const t=c.t;
+        return `<div class="toggle-row"><span class="ticon">${icon(t.icon)}</span><span class="tt"><b>${esc(t.title)}</b><span>${esc(intervalTxt({interval:t.interval,severe:AM.severe,severeInterval:t.severe}, {unit:AM.unit}))}</span></span><span class="switch ${c.on?"on":""}" onclick="AM.chosen[${i}].on=!AM.chosen[${i}].on;this.classList.toggle('on')"></span></div>`;}).join("")}
+      <div class="field" style="margin-top:12px"><label>Last done? (leave blank = due now)</label>
+        ${AM.chosen.map((c,i)=>`<div class="field-row" style="margin-bottom:8px"><div class="field" style="margin:0"><input type="date" id="ld-${i}" onchange="AM.lastDone['${c.t.id}']=this.value"></div><div style="align-self:center;font-size:13px;color:var(--text-dim);min-width:110px">${esc(c.t.title.slice(0,18))}</div></div>`).join("")}
+      </div>
+      <button class="btn-primary" onclick="finishAddMachine()">Add machine</button>
+      <button class="btn-text" style="width:100%" onclick="AM.step=3;renderAddMachine()">Back</button>`;
+  }
+  openSheet(body);
+}
+function amStep2Next(){
+  AM.make=$("#am-make").value.trim(); AM.model=$("#am-model").value.trim(); AM.year=$("#am-year").value.trim();
+  AM.name=$("#am-name").value.trim() || (AM.make+" "+AM.model).trim() || "New machine";
+  AM.step=3; renderAddMachine();
+}
+function amStep3Next(){
+  AM.current=$("#am-cur").value;
+  AM.step=4; renderAddMachine();
+}
+function finishAddMachine(){
+  const id = uid();
+  const cur = AM.current===""?null:Number(AM.current);
+  const m = { id, name:AM.name.toUpperCase(), category:AM.category, make:AM.make, model:AM.model, year:AM.year,
+    unit:AM.unit, current:cur, purchaseDate:todayStr(), notes:"", photoHue:Math.floor(Math.random()*360), archived:false, createdAt:todayStr(), severe:AM.severe };
+  S.machines.push(m);
+  for(const c of AM.chosen){
+    if(!c.on) continue;
+    const t=c.t; const ld = AM.lastDone[t.id];
+    const iv = AM.severe&&t.severe?Object.assign({},t.interval,t.severe):Object.assign({},t.interval);
+    S.items.push({ id:uid(), machineId:id, templateId:t.id, title:t.title, icon:t.icon,
+      interval:iv, first:t.first||null, lastReading:ld?(cur):null, lastDate:ld||null,
+      reminderLead:null, enabled:true, parts:t.parts||[], howTo:t.howTo||"", notes:"", snoozedUntil:null, severe:AM.severe, skipped:0 });
+  }
+  if(cur!=null) S.readings.push({id:uid(),machineId:id,value:cur,date:todayStr()});
+  save(); closeSheet(); AM=null;
+  go("machine",{machineId:id,tab:"upcoming"});
+  toast("Machine added ✓");
+}
+function vinDecode(){
+  const f=$("#vinField"); f.style.display = f.style.display==="none"?"":"none";
+  if(f.style.display!=="none"){
+    $("#am-vin").addEventListener("change", async e=>{
+      const vin=e.target.value.trim().toUpperCase();
+      if(vin.length!==17){ toast("VIN must be 17 characters"); return; }
+      try{
+        const r = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValuesExtended/${vin}?format=json`);
+        const j = await r.json(); const v = j.Results[0];
+        if(v.ModelYear&&v.ModelYear!=="Not Applicable") $("#am-year").value=v.ModelYear;
+        if(v.Make) $("#am-make").value=v.Make;
+        if(v.Model) $("#am-model").value=v.Model;
+        toast("VIN decoded ✓");
+      }catch(err){ toast("Couldn't reach VIN decoder — type it manually"); }
+    });
+  }
+}
+
+/* ================= add / edit maintenance ================= */
+function openAddMaint(mid){
+  const m = machineById(mid);
+  const have = new Set(itemsFor(mid).map(i=>i.templateId));
+  const sugg = templatesFor(m.category, m.make, m.model).filter(t=>!have.has(t.id));
+  openSheet(`<h2>Add maintenance</h2><div class="sub">${esc(m.name)} · suggested for this machine</div>
+    ${sugg.map((t,i)=>`<button class="toggle-row" data-tid="${t.id}" onclick="this.classList.toggle('sel');this.querySelector('.check-dot').classList.toggle('on')"><span class="check-dot">✓</span><span class="ticon">${icon(t.icon)}</span><span class="tt"><b>${esc(t.title)}</b><span>${esc(intervalTxt({interval:t.interval},{unit:m.unit}))}</span></span></button>`).join("")||'<div class="sub">All suggestions already added.</div>'}
+    ${sugg.length?`<button class="btn-primary" onclick="addSuggested('${mid}')">Add selected</button>`:""}
+    <button class="btn-secondary" style="margin-top:10px" onclick="openCustomMaint('${mid}')">+ Add custom item</button>
+    <button class="btn-text" style="width:100%" onclick="closeSheet()">Cancel</button>`);
+}
+function addSuggested(mid){
+  const tids = $$("#sheet [data-tid].sel").map(b=>b.dataset.tid);
+  if(!tids.length){ toast("Pick at least one"); return; }
+  const m = machineById(mid);
+  for(const tid of tids){
+    const t = templatesFor(m.category,m.make,m.model).find(x=>x.id===tid);
+    S.items.push({ id:uid(), machineId:mid, templateId:t.id, title:t.title, icon:t.icon, interval:Object.assign({},t.interval),
+      first:t.first||null, lastReading:null, lastDate:null, reminderLead:null, enabled:true, parts:t.parts||[], howTo:"", notes:"", snoozedUntil:null, severe:false, skipped:0 });
+  }
+  save(); closeSheet(); go("machine",{machineId:mid,tab:"upcoming"}); toast("Added ✓");
+}
+const ICON_CHOICES = ["i-oil","i-blades","i-battery","i-filter","i-plug","i-belt","i-tire","i-coolant","i-grease","i-fuel","i-wrench"];
+function openCustomMaint(mid, editId){
+  const m = machineById(mid);
+  const it = editId?S.items.find(x=>x.id===editId):null;
+  const iv = it?it.interval:{};
+  openSheet(`<h2>${it?"Edit":"Custom"} maintenance</h2><div class="sub">${esc(m.name)}</div>
+    <div class="field"><label>Title</label><input id="cm-title" value="${esc(it?it.title:"")}"></div>
+    <div class="field"><label>Icon</label><div class="seg" id="cm-icons">${ICON_CHOICES.map(ic=>`<button data-ic="${ic}" class="${it&&it.icon===ic?"active":""}" style="font-size:0;padding:12px">${icon(ic)}</button>`).join("")}</div></div>
+    <div class="field"><label>Every… (fill any)</label><div class="field-row">
+      <div class="field"><input type="number" id="cm-hours" placeholder="hours" value="${iv.hours||""}"></div>
+      <div class="field"><input type="number" id="cm-miles" placeholder="miles" value="${iv.miles||""}"></div>
+      <div class="field"><input type="number" id="cm-months" placeholder="months" value="${iv.months||""}"></div></div></div>
+    <div class="field"><label>Remind ahead (days)</label><input type="number" id="cm-lead" value="${it&&it.reminderLeadDays!=null?it.reminderLeadDays:""}"></div>
+    <div class="field"><label>Severe-duty interval (optional)</label><div class="field-row">
+      <div class="field"><input type="number" id="cm-svh" placeholder="hours" value="${(it&&it.severeInterval&&it.severeInterval.hours)||""}"></div>
+      <div class="field"><input type="number" id="cm-svm" placeholder="miles" value="${(it&&it.severeInterval&&it.severeInterval.miles)||""}"></div></div></div>
+    <div class="field"><label><input type="checkbox" id="cm-sev" ${it&&it.severe?"checked":""} style="width:auto;min-height:0"> This machine is on severe duty</label></div>
+    <div class="field"><label>How-to link</label><input id="cm-how" value="${esc(it?it.howTo:"")}" placeholder="https://…"></div>
+    <button class="btn-primary" onclick="saveCustomMaint('${mid}'${it?",'"+it.id+"'":""})">${it?"Save changes":"Add item"}</button>
+    <button class="btn-text" style="width:100%" onclick="closeSheet()">Cancel</button>
+    <script>$$("#cm-icons button").forEach(b=>b.onclick=()=>{$$("#cm-icons button").forEach(x=>x.classList.remove("active"));b.classList.add("active")})<\/script>`);
+}
+function saveCustomMaint(mid, editId){
+  const title = $("#cm-title").value.trim(); if(!title){ toast("Give it a title"); return; }
+  const ic = (($("#cm-icons .active")||{}).dataset||{}).ic || "i-wrench";
+  const iv = {};
+  const hh=$("#cm-hours").value, mm=$("#cm-miles").value, mo=$("#cm-months").value;
+  if(hh) iv.hours=Number(hh); if(mm) iv.miles=Number(mm); if(mo) iv.months=Number(mo);
+  const sev = {};
+  if($("#cm-svh").value) sev.hours=Number($("#cm-svh").value);
+  if($("#cm-svm").value) sev.miles=Number($("#cm-svm").value);
+  const data = { title, icon:ic, interval:iv, severeInterval:Object.keys(sev).length?sev:null,
+    severe:$("#cm-sev").checked, reminderLeadDays:$("#cm-lead").value===""?null:Number($("#cm-lead").value),
+    howTo:$("#cm-how").value.trim() };
+  if(editId){ Object.assign(S.items.find(x=>x.id===editId), data); }
+  else S.items.push(Object.assign({ id:uid(), machineId:mid, templateId:null, first:null, lastReading:null, lastDate:null, enabled:true, parts:[], notes:"", snoozedUntil:null, skipped:0 }, data));
+  save(); closeSheet(); go("machine",{machineId:mid,tab:"upcoming"}); toast("Saved ✓");
+}
+function resetToRecommended(taskId){
+  const it = S.items.find(x=>x.id===taskId);
+  const m = machineById(it.machineId);
+  const t = templatesFor(m.category,m.make,m.model).find(x=>x.id===it.templateId);
+  if(!t){ toast("Custom item — nothing to reset to"); return; }
+  it.interval = Object.assign({}, t.interval);
+  it.severeInterval = t.severe?Object.assign({},t.severe):null;
+  it.title = t.title; it.icon = t.icon; it.parts = t.parts||[];
+  save(); render(); toast("Reset to recommended ✓");
+}
+function openTaskMenu(taskId){
+  const it = S.items.find(x=>x.id===taskId);
+  openSheet(`<h2>${esc(it.title)}</h2><div class="sub">Task options</div>
+    <button class="menu-item" onclick="closeSheet();openCustomMaint('${it.machineId}','${it.id}')"><span class="ticon">✎</span>Edit interval<span class="arr">›</span></button>
+    ${it.templateId?`<button class="menu-item" onclick="closeSheet();resetToRecommended('${it.id}')"><span class="ticon">${icon("i-sun")}</span>Reset to recommended<span class="arr">›</span></button>`:""}
+    <button class="menu-item" onclick="closeSheet();skipItem('${it.id}')"><span class="ticon">${icon("i-snooze")}</span>Skip this time<span class="arr">›</span></button>
+    <button class="menu-item" onclick="disableItem('${it.id}')"><span class="ticon">✕</span>Turn off tracking<span class="arr">›</span></button>`);
+}
+function disableItem(id){ const it=S.items.find(x=>x.id===id); it.enabled=false; save(); closeSheet(); go("machine",{machineId:it.machineId,tab:"upcoming"}); toast("Tracking off"); }
+</script>
+<script>
+/* ================= receipts / warranties / notes / fuel ================= */
+function openReceiptSheet(mid, afterLog){
+  const m = machineById(mid);
+  openSheet(`<h2>Add receipt</h2><div class="sub">${esc(m.name)}</div>
+    <div class="field"><label>Photo (optional)</label><input type="file" id="rc-img" accept="image/*" capture="environment"></div>
+    <button class="btn-secondary" id="rc-ocr" style="margin-bottom:14px" onclick="runOCR()">Try reading text from photo (needs internet once)</button>
+    <div class="field"><label>Vendor</label><input id="rc-vendor"></div>
+    <div class="field-row"><div class="field"><label>Date</label><input type="date" id="rc-date" value="${todayStr()}"></div>
+    <div class="field"><label>Total</label><input type="number" id="rc-total" inputmode="decimal"></div></div>
+    <div class="field"><label>Category</label><div class="seg" id="rc-cat">${["parts","service","fuel","registration","insurance","other"].map((c,i)=>`<button data-v="${c}" class="${i===0?"active":""}">${c}</button>`).join("")}</div></div>
+    <button class="btn-primary" onclick="saveReceipt('${mid}')">Save receipt</button>
+    <button class="btn-text" style="width:100%" onclick="closeSheet()">Cancel</button>
+    <script>$$("#rc-cat button").forEach(b=>b.onclick=()=>{$$("#rc-cat button").forEach(x=>x.classList.remove("active"));b.classList.add("active")})<\/script>`);
+}
+async function fileToDataURL(file){
+  const img = await createImageBitmap(file);
+  const scale = Math.min(1, 1600/Math.max(img.width,img.height));
+  const c = document.createElement("canvas"); c.width=img.width*scale; c.height=img.height*scale;
+  c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+  return c.toDataURL("image/jpeg",0.8);
+}
+async function saveReceipt(mid){
+  const imgFile = $("#rc-img").files[0];
+  let image=null;
+  if(imgFile){ try{ image = await fileToDataURL(imgFile); }catch(e){ toast("Photo couldn't be saved — receipt saved without it"); } }
+  const cat = (($("#rc-cat .active")||{}).dataset||{}).v || "parts";
+  S.receipts.push({ id:uid(), machineId:mid, serviceLogId:null, image, ocrText:null,
+    vendor:$("#rc-vendor").value.trim()||"Receipt", date:$("#rc-date").value||todayStr(),
+    total:$("#rc-total").value===""?null:Number($("#rc-total").value), category:cat });
+  save(); closeSheet(); go("machine",{machineId:mid,tab:"history"}); toast("Receipt saved ✓");
+}
+async function runOCR(){
+  const file = $("#rc-img").files[0];
+  if(!file){ toast("Choose a photo first"); return; }
+  toast("Loading scanner… (one-time download)");
+  try{
+    if(!window.Tesseract){
+      await new Promise((res,rej)=>{ const s=document.createElement("script"); s.src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"; s.onload=res; s.onerror=rej; document.head.appendChild(s); });
+    }
+    const res = await Tesseract.recognize(file, "eng");
+    const text = res.data.text||"";
+    // vendor = first non-empty line; total = largest money value
+    const lines = text.split("\n").map(s=>s.trim()).filter(Boolean);
+    if($("#rc-vendor").value==="" && lines.length) $("#rc-vendor").value = lines[0].slice(0,40);
+    const monies = [...text.matchAll(/\$?\s?(\d{1,5}\.\d{2})/g)].map(x=>Number(x[1])).filter(n=>n>0);
+    if(monies.length) $("#rc-total").value = Math.max(...monies);
+    toast("Read what I could — check and fix the fields");
+  }catch(e){ toast("Scanner unavailable offline — just type the fields"); }
+}
+function openWarrantySheet(mid){
+  const m = machineById(mid);
+  openSheet(`<h2>Add warranty</h2><div class="sub">${esc(m.name)}</div>
+    <div class="field"><label>Provider</label><input id="wr-prov"></div>
+    <div class="field"><label>Coverage</label><input id="wr-cov" placeholder="e.g. 2-yr extended"></div>
+    <div class="field-row"><div class="field"><label>Starts</label><input type="date" id="wr-start" value="${todayStr()}"></div>
+    <div class="field"><label>Ends</label><input type="date" id="wr-end"></div></div>
+    <div class="field"><label>Policy #</label><input id="wr-pol"></div>
+    <button class="btn-primary" onclick="saveWarranty('${mid}')">Save warranty</button>
+    <button class="btn-text" style="width:100%" onclick="closeSheet()">Cancel</button>`);
+}
+function saveWarranty(mid){
+  S.warranties.push({ id:uid(), machineId:mid, provider:$("#wr-prov").value.trim()||"Warranty", coverage:$("#wr-cov").value.trim(),
+    start:$("#wr-start").value, end:$("#wr-end").value, usageLimit:null, policy:$("#wr-pol").value.trim(), receiptId:null, notes:"" });
+  save(); closeSheet(); go("machine",{machineId:mid,tab:"upcoming"}); toast("Warranty saved ✓");
+}
+function openNoteSheet(mid){
+  const m = machineById(mid);
+  openSheet(`<h2>Add note</h2><div class="sub">${esc(m.name)}</div>
+    <div class="field"><label>Note</label><textarea id="nt-body"></textarea></div>
+    <div class="field"><label><input type="checkbox" id="nt-pin" style="width:auto;min-height:0"> Pin it</label></div>
+    <button class="btn-primary" onclick="saveNote('${mid}')">Save note</button>
+    <button class="btn-text" style="width:100%" onclick="closeSheet()">Cancel</button>`);
+}
+function saveNote(mid){
+  const b=$("#nt-body").value.trim(); if(!b){ toast("Write something first"); return; }
+  S.notes.push({ id:uid(), machineId:mid, body:b, date:todayStr(), linkedId:null, pinned:$("#nt-pin").checked });
+  save(); closeSheet(); go("machine",{machineId:mid,tab:"notes"}); toast("Note saved ✓");
+}
+function togglePin(id){ const n=S.notes.find(x=>x.id===id); n.pinned=!n.pinned; save(); render(); }
+function deleteNote(id){ const snap=JSON.stringify(S); S.notes=S.notes.filter(x=>x.id!==id); save(); render(); toast("Note deleted",()=>{S=JSON.parse(snap);save();render();}); }
+function openFuelSheet(mid){
+  const m = machineById(mid);
+  openSheet(`<h2>Log fill-up</h2><div class="sub">${esc(m.name)}</div>
+    <div class="field"><label>Date</label><input type="date" id="fu-date" value="${todayStr()}"></div>
+    <div class="field-row"><div class="field"><label>Odometer</label><input type="number" id="fu-read" inputmode="decimal" value="${m.current||""}"></div>
+    <div class="field"><label>Gallons</label><input type="number" id="fu-gal" inputmode="decimal"></div></div>
+    <div class="field-row"><div class="field"><label>Price/gal</label><input type="number" id="fu-ppg" inputmode="decimal" step="0.01"></div>
+    <div class="field"><label>Total</label><input type="number" id="fu-tot" inputmode="decimal" step="0.01"></div></div>
+    <div class="field"><label><input type="checkbox" id="fu-full" checked style="width:auto;min-height:0"> Full tank</label></div>
+    <button class="btn-primary" onclick="saveFuel('${mid}')">Save fill-up</button>
+    <button class="btn-text" style="width:100%" onclick="closeSheet()">Cancel</button>`);
+}
+function saveFuel(mid){
+  const m=machineById(mid);
+  const reading=$("#fu-read").value===""?null:Number($("#fu-read").value);
+  const gal=Number($("#fu-gal").value||0), ppg=Number($("#fu-ppg").value||0);
+  let tot=$("#fu-tot").value===""?null:Number($("#fu-tot").value);
+  if(tot==null && gal&&ppg) tot=+(gal*ppg).toFixed(2);
+  S.fuel.push({ id:uid(), machineId:mid, date:$("#fu-date").value||todayStr(), reading, gallons:gal, price:ppg, total:tot||0, full:$("#fu-full").checked });
+  if(reading!=null){ m.current=Math.max(m.current||0,reading); S.readings.push({id:uid(),machineId:mid,value:reading,date:$("#fu-date").value||todayStr()}); }
+  save(); closeSheet(); render(); toast("Fill-up saved ✓");
+}
+function openSpecSheet(mid){
+  const m=machineById(mid);
+  const parts=S.parts.filter(p=>p.machineId===mid);
+  openSheet(`<h2>Spec sheet</h2><div class="sub">${esc(m.name)} — oil, filters, plugs, sizes</div>
+    <div id="sp-rows">${parts.map((p,i)=>`<div class="field-row" style="margin-bottom:8px">
+      <div class="field" style="margin:0"><input placeholder="Type (oil)" value="${esc(p.type)}" data-sp="type" data-i="${i}"></div>
+      <div class="field" style="margin:0;flex:1.4"><input placeholder="Spec (10W-30, 2 qt)" value="${esc(p.spec)}" data-sp="spec" data-i="${i}"></div>
+      <div class="field" style="margin:0"><input placeholder="Part #" value="${esc(p.part||"")}" data-sp="part" data-i="${i}"></div></div>`).join("")}
+    </div>
+    <button class="btn-text" id="sp-add" style="width:100%">+ Add row</button>
+    <button class="btn-primary" onclick="saveSpecSheet('${mid}')">Save spec sheet</button>
+    <button class="btn-text" style="width:100%" onclick="closeSheet()">Cancel</button>`);
+  $("#sp-add").onclick=()=>{
+    const i=S.parts.filter(p=>p.machineId===mid).length+$$("#sp-rows [data-sp]").length/3;
+    $("#sp-rows").innerHTML += `<div class="field-row" style="margin-bottom:8px"><div class="field" style="margin:0"><input placeholder="Type" data-sp="type" data-i="n${i}"></div><div class="field" style="margin:0;flex:1.4"><input placeholder="Spec" data-sp="spec" data-i="n${i}"></div><div class="field" style="margin:0"><input placeholder="Part #" data-sp="part" data-i="n${i}"></div></div>`;
+  };
+}
+function saveSpecSheet(mid){
+  const rows={};
+  $$("#sp-rows [data-sp]").forEach(inp=>{ const k=inp.dataset.i; rows[k]=rows[k]||{}; rows[k][inp.dataset.sp]=inp.value; });
+  S.parts = S.parts.filter(p=>p.machineId!==mid);
+  for(const k of Object.keys(rows)){ const r=rows[k]; if(r.type||r.spec||r.part) S.parts.push({id:uid(),machineId:mid,type:r.type||"",spec:r.spec||"",part:r.part||"",store:""}); }
+  save(); closeSheet(); render(); toast("Spec sheet saved ✓");
+}
+function openMachineMenu(mid){
+  const m=machineById(mid);
+  openSheet(`<h2>${esc(m.name)}</h2><div class="sub">${esc(m.make)} ${esc(m.model)} ${esc(m.year)} · ${esc(DB.categories[m.category].label)}</div>
+    <button class="menu-item" onclick="closeSheet();duplicateMachine('${mid}')"><span class="ticon">⧉</span>Duplicate machine<span class="arr">›</span></button>
+    <button class="menu-item" onclick="archiveMachine('${mid}',true)"><span class="ticon">${icon("i-garage")}</span>Archive (sold it)<span class="arr">›</span></button>
+    <button class="menu-item" onclick="removeMachine('${mid}')"><span class="ticon">✕</span>Delete machine<span class="arr">›</span></button>`);
+}
+function duplicateMachine(mid){
+  const m=machineById(mid); const nid=uid();
+  const c=JSON.parse(JSON.stringify(m)); c.id=nid; c.name=m.name+" (2)"; S.machines.push(c);
+  for(const it of S.items.filter(i=>i.machineId===mid)){ const ci=JSON.parse(JSON.stringify(it)); ci.id=uid(); ci.machineId=nid; S.items.push(ci); }
+  for(const p of S.parts.filter(p=>p.machineId===mid)){ const cp=JSON.parse(JSON.stringify(p)); cp.id=uid(); cp.machineId=nid; S.parts.push(cp); }
+  save(); closeSheet(); go("garage"); toast("Duplicated ✓");
+}
+function archiveMachine(mid){ const m=machineById(mid); m.archived=true; save(); closeSheet(); go("garage"); toast("Archived — history kept"); }
+function removeMachine(mid){
+  const snap=JSON.stringify(S);
+  S.machines=S.machines.filter(x=>x.id!==mid); S.items=S.items.filter(x=>x.machineId!==mid);
+  save(); closeSheet(); go("garage");
+  toast("Machine deleted",()=>{S=JSON.parse(snap);save();render();});
+}
+function openServiceSearch(cat){
+  const q = { "riding-mower":"small engine repair near me", "generator":"generator repair near me", "truck":"auto repair near me", "tractor":"tractor repair near me" }[cat] || "equipment repair near me";
+  window.open("https://www.google.com/maps/search/"+encodeURIComponent(q), "_blank");
+}
+
+/* ================= checklists ================= */
+function openChecklist(mid, kind){
+  const m=machineById(mid);
+  const lists = DB.seasonal[m.category]||{};
+  const list = lists[kind]||[];
+  const flags = {};
+  const title = kind==="spring"?"Spring startup":"Winter storage";
+  const render2=()=>{
+    openSheet(`<h2>${title}</h2><div class="sub">${esc(m.name)}</div>
+      ${list.map((c,i)=>`<button class="check-item ${flags[i]?"done":""}" data-ci="${i}"><span class="check-dot ${flags[i]?"on":""}">✓</span><span class="ct">${esc(c)}</span></button>`).join("")}
+      <button class="btn-primary" style="margin-top:14px" onclick="finishChecklist('${mid}','${kind}')">Log checklist as done</button>
+      <button class="btn-text" style="width:100%" onclick="closeSheet()">Close</button>`);
+    $$("#sheet .check-item").forEach(b=>b.onclick=()=>{ flags[b.dataset.ci]=!flags[b.dataset.ci]; b.classList.toggle("done"); b.querySelector(".check-dot").classList.toggle("on"); });
+  };
+  render2();
+}
+function finishChecklist(mid, kind){
+  const m=machineById(mid);
+  S.logs.push({ id:uid(), machineId:mid, scheduleItemId:null, date:todayStr(), reading:m.current,
+    title:(kind==="spring"?"Spring startup":"Winter storage")+" checklist", parts:[], laborCost:0, shop:"DIY", total:0, notes:"", receiptIds:[], createdAt:todayStr() });
+  save(); closeSheet(); go("machine",{machineId:mid,tab:"history"}); toast("Checklist logged ✓");
+}
+
+/* ================= export / import ================= */
+function download(name, content, type){
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([content],{type})); a.download=name; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+}
+function exportJSON(){
+  download("bills-garage-backup.json", JSON.stringify(S,null,2), "application/json");
+  S.settings.lastBackup = todayStr(); save(); toast("Backup downloaded ✓");
+}
+function importJSON(input){
+  const f=input.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>{ try{ const j=JSON.parse(r.result); if(!j.machines) throw 0; S=j; save(); go("garage"); toast("Backup restored ✓"); }catch(e){ toast("That file didn't look like a backup"); } };
+  r.readAsText(f);
+}
+function exportCSV(){
+  const rows=[["type","machine","title","date","reading","cost","notes"]];
+  for(const l of S.logs){ const m=machineById(l.machineId); rows.push(["service",m?m.name:"",l.title,l.date,l.reading??"",l.total??"",l.notes||""]); }
+  for(const f of S.fuel){ const m=machineById(f.machineId); rows.push(["fuel",m?m.name:"","Fill-up",f.date,f.reading??"",f.total??"",f.gallons+" gal"]); }
+  for(const w of S.warranties){ const m=machineById(w.machineId); rows.push(["warranty",m?m.name:"",w.provider+" "+w.coverage,w.end,"","",""]); }
+  const csv = rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
+  download("bills-garage.csv", csv, "text/csv"); toast("CSV downloaded ✓");
+}
+function icsEscape(s){ return String(s).replace(/[\\,;]/g, m=>"\\"+m); }
+function exportItemICS(itemId){
+  const it=S.items.find(x=>x.id===itemId); if(!it) return;
+  const st=itemStatus(it, machineById(it.machineId));
+  const d = st.dueDate || st.etaDate; if(!d){ toast("No due date to export"); return; }
+  const ymd = d.replace(/-/g,"");
+  download("maintenance.ics", ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Bills Garage//EN","BEGIN:VEVENT",
+    "UID:"+it.id+"@bills-garage","DTSTAMP:"+ymd+"T120000Z","DTSTART;VALUE=DATE:"+ymd,
+    "SUMMARY:"+icsEscape("Maintenance: "+it.title+" — "+machineById(it.machineId).name),
+    "BEGIN:VALARM","TRIGGER:-P1D","ACTION:DISPLAY","END:VALARM","END:VEVENT","END:VCALENDAR"].join("\r\n"),
+    "text/calendar");
+  toast("Calendar file saved ✓");
+}
+function exportAllICS(){
+  const ups = allUpcoming();
+  const evts = [];
+  for(const u of ups){
+    const d = u.st.dueDate || u.st.etaDate; if(!d) continue;
+    const ymd = d.replace(/-/g,"");
+    evts.push(["BEGIN:VEVENT","UID:"+u.item.id+"@bills-garage","DTSTAMP:"+ymd+"T120000Z","DTSTART;VALUE=DATE:"+ymd,
+      "SUMMARY:"+icsEscape("Maintenance: "+u.item.title+" — "+u.machine.name),
+      "BEGIN:VALARM","TRIGGER:-P1D","ACTION:DISPLAY","END:VALARM","END:VEVENT"].join("\r\n"));
+  }
+  if(!evts.length){ toast("No dated items to export"); return; }
+  download("bills-garage-upcoming.ics", ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Bills Garage//EN",...evts,"END:VCALENDAR"].join("\r\n"), "text/calendar");
+  toast("Calendar file saved ✓");
+}
+function printReport(){
+  const win = window.open("", "_blank");
+  if(!win){ toast("Allow popups to print the report"); return; }
+  let rows="";
+  for(const m of S.machines){
+    const logs = S.logs.filter(l=>l.machineId===m.id).sort((a,b)=>a.date<b.date?-1:1);
+    rows += `<h2 style="font-family:sans-serif">${esc(m.name)} — ${esc(m.make)} ${esc(m.model)} ${esc(m.year)}</h2>`+
+      (logs.length?`<table border="1" cellspacing="0" cellpadding="6" style="font-family:sans-serif;border-collapse:collapse"><tr><th>Date</th><th>Service</th><th>Reading</th><th>Cost</th></tr>${logs.map(l=>`<tr><td>${l.date}</td><td>${esc(l.title)}</td><td>${l.reading??""}</td><td>${money(l.total)}</td></tr>`).join("")}</table>`:"<p>No services recorded.</p>");
+  }
+  win.document.write(`<html><head><title>Service history</title></head><body><h1 style="font-family:sans-serif">Bill's Garage — Service History</h1>${rows}</body></html>`);
+  win.document.close(); win.focus(); setTimeout(()=>win.print(), 400);
+}
+function setLead(d){ S.settings.defaultLeadDays=d; save(); render(); }
+function resetDemo(){ if(confirm("Reset all data back to the demo garage? Your entries will be erased.")){ localStorage.removeItem(STORE_KEY); S=seedState(); save(); go("garage"); toast("Reset ✓"); } }
+
+/* ================= onboarding (first run) ================= */
+let OB = 0;
+const OB_PAGES = [
+  { h:"BILL'S GARAGE", p:"Every machine you own, and everything it needs — in one place. No more guessing when the oil was last changed." },
+  { h:"ADD YOUR MACHINES", p:"Pick the kind of machine, and the app suggests its whole maintenance schedule. Adjust anything — your manual wins." },
+  { h:"LOG IN SECONDS", p:"Tap Log, confirm, done. The next due date figures itself out. Works offline in the garage." }
+];
+function showOnboarding(){
+  const ob=$("#onboard"); ob.classList.add("open"); OB=0; drawOB();
+}
+function drawOB(){
+  const p=OB_PAGES[OB];
+  const lineup = S?S.machines.slice(0,3).map(m=>machineArt(m,"120px","80px")).join(""):"";
+  $("#onboard").innerHTML = `<div class="olineup"><div style="display:flex;gap:8px">${lineup}</div></div>
+    <h1>${p.h}</h1><p>${p.p}</p>
+    <div class="dots">${OB_PAGES.map((x,i)=>`<i class="${i===OB?"on":""}"></i>`).join("")}</div>
+    <button class="btn-primary" onclick="obNext()">${OB<OB_PAGES.length-1?"Next":"Get started"}</button>
+    <button class="btn-text" style="width:100%;margin-top:8px" onclick="obDone()">Skip</button>`;
+}
+function obNext(){ if(OB<OB_PAGES.length-1){ OB++; drawOB(); } else obDone(); }
+function obDone(){ S.onboarded=true; save(); $("#onboard").classList.remove("open"); }
+
+/* ================= init ================= */
+function bindCommon(root){}
+load();
+render();
+if("serviceWorker" in navigator){ navigator.serviceWorker.register("sw.js").catch(()=>{}); }
+if(!S.onboarded) showOnboarding();
+</script>
+</body>
+</html>
