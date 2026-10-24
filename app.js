@@ -42,8 +42,9 @@ const blank = () => ({
   machines: [], items: [], logs: [], notes: [], receipts: [], warranties: [], fuel: [], readings: [],
 });
 let S = blank();
-let saveTimer = null;
+let saveTimer = null, saveSeq = 0;
 function save() {
+  saveSeq++;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     idbPut('kv', 'state', JSON.parse(JSON.stringify(S)));
@@ -290,7 +291,7 @@ function route() {
 function render() {
   closeFab();
   const r = route();
-  if (!S.settings.onboarded && !['welcome', 'add', 'added', 'suggest', 'install'].includes(r[0])) { location.replace('#/welcome/1'); return; }
+  if (!S.settings.onboarded && !['welcome', 'add', 'added', 'suggest', 'install', 'safety', 'feedback'].includes(r[0])) { location.replace('#/welcome/1'); return; }
   const [a, b, c, d] = r;
   const same = render.lastHash === location.hash, y = window.scrollY;
   render.lastHash = location.hash;
@@ -322,6 +323,10 @@ function render() {
     else if (a === 'archived') html = vArchived();
     else if (a === 'install') html = vInstall();
     else if (a === 'import') html = vImport();
+    else if (a === 'data') html = vData();
+    else if (a === 'log') html = vLog(b && M(b) ? b : null);
+    else if (a === 'safety') html = vSafety();
+    else if (a === 'feedback') html = vFeedback();
     else html = vGarage();
   } catch (e) { console.error(e); html = `<div class="screen"><div class="empty"><b>Something went wrong.</b><span>${esc(e.message)}</span><button class="btn secondary" data-act="home">Back to garage</button></div></div>`; }
   applyTheme();
@@ -417,15 +422,15 @@ function vWelcome(n) {
     </div>`;
   }
   if (n === 2) return `<div class="screen stagger">
-    ${topBar('', '#/welcome/1')}${steps(4, 1)}
+    ${topBar('', '#/welcome/1')}${steps(5, 1)}
     <div class="demo-frame" aria-hidden="true">${demoRow('over')}${demoRow('ok')}</div>
     <h2 class="headline">Never miss a service</h2>
     <p class="note">Reminders by miles, hours or date, whichever comes first. It learns how much you use each machine.</p>
     <div class="spacer"></div>
-    <div class="actions-bottom"><button class="btn primary" data-act="go" data-to="#/welcome/3">Next</button><button class="btn text" data-act="go" data-to="#/welcome/4">Skip</button></div>
+    <div class="actions-bottom"><button class="btn primary" data-act="go" data-to="#/welcome/3">Next</button><button class="btn text" data-act="go" data-to="#/welcome/5">Skip</button></div>
   </div>`;
   if (n === 3) return `<div class="screen stagger">
-    ${topBar('', '#/welcome/2')}${steps(4, 2)}
+    ${topBar('', '#/welcome/2')}${steps(5, 2)}
     <h2 class="headline">Everything in one spot</h2>
     <p class="note">History, receipts, warranties and part numbers live with each machine, on this phone, even with no signal.</p>
     <div class="stack" style="gap:6px">
@@ -435,13 +440,14 @@ function vWelcome(n) {
       <div class="feat"><span class="fi">${icon('oil', 22)}</span><div><div class="t">Part numbers saved</div><div class="d">Oil, filters and plugs per machine</div></div></div>
     </div>
     <div class="spacer"></div>
-    <div class="actions-bottom"><button class="btn primary" data-act="go" data-to="#/welcome/4">Next</button><button class="btn text" data-act="go" data-to="#/welcome/4">Skip</button></div>
+    <div class="actions-bottom"><button class="btn primary" data-act="go" data-to="#/welcome/4">Next</button><button class="btn text" data-act="go" data-to="#/welcome/5">Skip</button></div>
   </div>`;
-  if (n === 4) {
+  if (n === 4) return onbSafety();
+  if (n === 5) {
     const cur = ['My Garage', "Bill's Garage"].includes(S.settings.garage) ? '' : S.settings.garage;
     after.push(() => { const i = $('#garageName'); if (i && !cur) setTimeout(() => i.focus(), 400); });
     return `<div class="screen stagger">
-    ${topBar('', '#/welcome/3')}${steps(4, 3)}
+    ${topBar('', '#/welcome/4')}${steps(5, 4)}
     <h2 class="headline">Name your garage</h2>
     <p class="note">Shows at the top of the app and under the Home Screen icon.</p>
     <input class="inp bebas" id="garageName" value="${esc(cur)}" placeholder="e.g. Bill's Garage" maxlength="28" autocapitalize="words" enterkeyhint="next" style="font-size:36px;height:72px;text-transform:uppercase">
@@ -453,7 +459,7 @@ function vWelcome(n) {
   }
   const standalone = isStandalone();
   return `<div class="screen stagger">
-    ${topBar('', '#/welcome/4')}${steps(4, 4)}
+    ${topBar('', '#/welcome/5')}${steps(5, 5)}
     <h2 class="headline">${standalone ? 'Stay on schedule' : 'Put it on your Home Screen'}</h2>
     ${standalone ? `<p class="note">Get a heads-up when something is due.</p>` : `<p class="note">Full screen, works offline, reminders can show up. Do this <b style="color:#fff">before</b> adding anything: the Home Screen app keeps its own data.</p>
     ${installSteps(detectPlatform(), true)}`}
@@ -519,7 +525,7 @@ let installTab = null;
 function vInstall() {
   const pf = installTab || detectPlatform();
   const tabs = [['ios-safari', 'iPhone · Safari'], ['ios-chrome', 'iPhone · Chrome'], ['android', 'Android']];
-  return `<div class="screen">${topBar('Add to Home Screen', S.settings.onboarded ? '#/profile' : '#/welcome/5')}
+  return `<div class="screen">${topBar('Add to Home Screen', S.settings.onboarded ? '#/profile' : '#/welcome/6')}
     ${isStandalone() ? `<div class="nudge"><div class="ibox" style="background:rgba(18,255,84,.15);color:var(--green)">${icon('check', 20)}</div><div class="grow"><div class="t">You’re already using the Home Screen app</div><div class="d">Nothing else to do.</div></div></div>` : ''}
     <div class="seg">${tabs.map(([k, l]) => `<button class="${(pf === k || (pf === 'ios-other' && k === 'ios-safari') || (pf === 'desktop' && k === 'android')) ? 'on' : ''}" data-act="install-tab" data-v="${k}" style="font-size:13px">${l}</button>`).join('')}</div>
     ${installSteps(pf)}
@@ -553,7 +559,7 @@ function vGarage() {
   return `<div class="screen has-nav">
     <div class="fixed-top">
       <div class="hdr"><button class="title-btn" data-act="rename-garage"><span class="h-title">${esc(S.settings.garage)}</span></button>
-        <button class="rbtn lg" data-act="go" data-to="#/add" aria-label="Add machine">${icon('plus', 22)}</button></div>
+        <button class="rbtn" data-act="garage-menu" aria-label="More options">${icon('more', 18)}</button></div>
       ${ms.length ? `<div class="carousel">${ms.map((m) => machineCard(m)).join('')}<button class="mcard add" data-act="go" data-to="#/add"><div><div class="rbtn">${icon('plus', 18)}</div>Add machine</div></button></div>` : ''}
     </div>
     ${!ms.length ? `<div class="card dark" style="text-align:center;padding:28px 18px">${art('truck', 84)}<h2 class="headline" style="margin:8px 0 6px">Add your first machine</h2><p class="note" style="margin-bottom:16px">Truck, mower, generator, anything with an engine. We'll suggest a maintenance schedule for it.</p><button class="btn primary" data-act="go" data-to="#/add">Add machine</button></div>` : ''}
@@ -618,7 +624,7 @@ function machineHistory(m) {
   fuel.forEach((f) => rows.push({ date: f.date, html: `<button class="lrow" data-act="edit-fuel" data-id="${f.id}"><div class="ibox">${icon('fuel', 18)}</div><div class="grow"><div class="t">Fuel-up${f.mpg ? ` · ${f.mpg.toFixed(1)} mpg` : ''}</div><div class="d">${fmtDate(f.date, true)} · ${f.gallons} ${m.unit === 'km' ? 'L' : 'gal'}${f.reading ? ' · ' + fmtN(f.reading, UNIT_LABEL[m.unit]) : ''}</div></div><div class="v">${money(f.total)}</div></button>` }));
   rows.sort((a, b) => b.date.localeCompare(a.date));
   return `${head}${rows.length ? `<div class="group">${rows.map((r) => r.html).join('')}</div>` : empty('clock', 'No history yet', 'Logged services show up here.')}
-    <div class="two no-print"><button class="btn secondary" data-act="go" data-to="#/m/${m.id}/report">${icon('print', 18)}Report</button><button class="btn secondary" data-act="csv" data-id="${m.id}">${icon('download', 18)}CSV</button></div>`;
+    ${rows.length ? `<button class="btn secondary" data-act="go" data-to="#/log/${m.id}">${icon('print', 18)}Print or save this machine’s log</button>` : ''}`;
 }
 function mpgStats(m) {
   const f = S.fuel.filter((x) => x.machineId === m.id && x.mpg).map((x) => x.mpg);
@@ -700,7 +706,7 @@ function vAdd(step) {
   if (step === 1) {
     const groups = {};
     Object.entries(CATS).forEach(([k, c]) => (groups[c.group] = groups[c.group] || []).push([k, c]));
-    return `<div class="screen">${topBar('Add machine', S.settings.onboarded ? '#/' : '#/welcome/4')}${steps(4, 1)}
+    return `<div class="screen">${topBar('Add machine', S.settings.onboarded ? '#/' : '#/welcome/6')}${steps(4, 1)}
       <h2 class="headline">What kind of machine?</h2>
       ${Object.entries(groups).map(([g, list]) => `<div class="grouplabel">${esc(g)}</div><div class="catgrid">${list.map(([k, c]) => `<button class="cat ${draft.cat === k ? 'on' : ''}" data-act="pick-cat" data-cat="${k}">${art(k, 44)}<span>${esc(c.label)}</span></button>`).join('')}</div>`).join('')}
     </div>`;
@@ -915,8 +921,7 @@ function vSchedule() {
   });
   const sec = (t, arr) => arr.length ? `<div class="sec-title">${t}</div><div class="list">${arr.map((x) => mrow(x.it, x.st)).join('')}</div>` : '';
   return `<div class="screen has-nav">
-    <div class="hdr sticky"><div class="h-title">Schedule</div><button class="rbtn" data-act="ics-all" aria-label="Add all to calendar">${icon('calendar', 18)}</button></div>
-    ${backupRow() ? `<div class="sec-title">Your data</div><div class="list">${backupRow()}</div>` : ''}
+    <div class="hdr sticky"><div class="h-title">Schedule</div><button class="rbtn" data-act="schedule-menu" aria-label="More options">${icon('more', 18)}</button></div>
     ${r.length ? sec('Overdue', g.over) + sec('This week', g.week) + sec('This month', g.month) + sec('Later', g.later) + sec('Snoozed', g.snoozed) : empty('calendar', 'Nothing scheduled', 'Add a machine and its maintenance shows up here.', `<button class="btn primary" style="width:auto;padding:0 24px" data-act="go" data-to="#/add">Add machine</button>`)}
   </div>${nav('schedule')}`;
 }
@@ -948,36 +953,40 @@ function vProfile() {
   const archived = S.machines.filter((m) => m.archived).length;
   const nperm = ('Notification' in window) ? Notification.permission : 'unsupported';
   const row = (act, ic, t, d, extra = '') => `<button class="lrow" ${act}><div class="ibox">${icon(ic, 18)}</div><div class="grow"><div class="t">${t}</div>${d ? `<div class="d">${d}</div>` : ''}</div>${extra}</button>`;
-  const bk = backupStatus();
+  const bkState = backupSummary();
   return `<div class="screen has-nav">
     <div class="hdr sticky"><div class="h-title">Settings</div></div>
     ${total ? `<div class="card"><div class="row between"><div><div class="muted" style="font-size:12px">Spent in ${yr}</div><div class="bebas" style="font-size:38px">${money(total)}</div></div><div class="muted" style="text-align:right;font-size:13px">${plural(S.logs.filter((l) => !l.skipped).length, 'service')} logged</div></div>
       <div class="stack" style="margin-top:10px">${spendBy.map((x) => `<div><div class="row between" style="font-size:13px"><span>${esc(x.m.name)}</span><span class="muted">${money(x.v)}</span></div><div class="bar" style="margin-top:4px;background:#222"><i style="width:${Math.round(x.v / max * 100)}%;background:#fff"></i></div></div>`).join('')}</div></div>` : ''}
+    <div class="sec-title">Backup & data</div>
+    <button class="datacard" data-act="go" data-to="#/data">
+      <div class="ibox ${bkState.cls}">${icon(bkState.icon, 22)}</div>
+      <div class="grow"><div class="t">${bkState.title}</div><div class="d">${bkState.sub}</div></div>${icon('back', 16, 'flip')}
+    </button>
+    <div class="group">
+      ${row('data-act="go" data-to="#/log"', 'print', 'Print or save garage log', 'A PDF of every machine, photo and receipt')}
+    </div>
     <div class="sec-title">Garage</div>
     <div class="group">
       ${row('data-act="rename-garage"', 'garage', 'Name', esc(S.settings.garage))}
       ${row('data-act="theme-sheet"', 'palette', 'Theme', esc((THEMES.find((x) => x[0] === (S.settings.theme || 'shop')) || THEMES[0])[1]))}
       ${row('data-act="toggle-units"', 'gauge', 'Distance for new vehicles', S.settings.distUnit === 'km' ? 'Kilometers' : 'Miles')}
-      ${archived ? row('data-act="go" data-to="#/archived"', 'storage', 'Archived', plural(archived, 'machine')) : ''}
+      ${archived ? row('data-act="go" data-to="#/archived"', 'storage', 'Archived machines', plural(archived, 'machine')) : ''}
     </div>
     <div class="sec-title">Reminders</div>
     <div class="group">
       ${row('data-act="notify-on"', 'bell', 'Notifications', nperm === 'granted' ? 'On' : nperm === 'denied' ? 'Blocked in browser settings' : nperm === 'unsupported' ? 'Add to Home Screen first' : 'Off')}
       ${row('data-act="lead-days"', 'clock', 'Warn me', `${S.settings.leadDays} days before`)}
-      ${row('data-act="backup-snooze"', 'save', 'Backup reminder', esc((BACKUP_OPTS.find((o) => o[0] === S.settings.backupEvery) || [0, 'Off'])[1]) + (bk && S.settings.backupEvery ? ' · next ' + fmtDate(bk.due) : ''))}
-      ${row('data-act="ics-all"', 'calendar', 'Add to calendar', '')}
-    </div>
-    <div class="sec-title">Your data</div>
-    <div class="group">
-      ${row('data-act="backup"', 'download', 'Back up', S.settings.lastBackup ? 'Last ' + fmtDate(S.settings.lastBackup, true) : 'Never')}
-      <label class="lrow" style="cursor:pointer"><div class="ibox">${icon('upload', 18)}</div><div class="grow"><div class="t">Restore</div><div class="d">Replaces what’s on this phone</div></div><input type="file" accept=".json,application/json" hidden data-change="restore"></label>
-      ${row('data-act="go" data-to="#/import"', 'fileup', 'Import from another app', 'VMT, Fuelly, Drivvo, any CSV')}
-      ${row('data-act="csv"', 'sheet', 'Export history', 'CSV for Excel or Sheets')}
+      ${row('data-act="ics-all"', 'calendar', 'Add due dates to my calendar', 'Works with Apple, Google or Outlook')}
     </div>
     <div class="sec-title">Help</div>
-    <div class="group">${row('data-act="go" data-to="#/install"', 'squareplus', 'Add to Home Screen', isStandalone() ? 'Done' : '')}</div>
-    <button class="btn text" data-act="reset-all" style="color:#ff6b6b">Erase all data</button>
+    <div class="group">
+      ${row('data-act="go" data-to="#/safety"', 'shield', 'How your data stays safe', 'Where it lives and how backups work')}
+      ${row('data-act="go" data-to="#/install"', 'squareplus', 'Add to Home Screen', isStandalone() ? 'Done' : 'Opens full screen, works offline')}
+      ${row('data-act="go" data-to="#/feedback"', 'bug', 'Report a bug or send an idea', 'Goes straight to the person who built this')}
+    </div>
     <a class="credit" href="https://masen.site" target="_blank" rel="noopener">Built in a garage by a design student who should’ve been studying · <b>masen.site</b></a>
+    <p class="note" style="text-align:center;font-size:12px">Version ${typeof APP_VERSION !== 'undefined' ? APP_VERSION : ''}</p>
   </div>${nav('profile')}`;
 }
 function vArchived() {
@@ -1112,6 +1121,7 @@ function matchItems(mid, title) {
   return [...out];
 }
 function runImport() {
+  makeSnapshot('Before importing ' + (imp && imp.name ? imp.name : 'a file')).catch(() => {});
   const recs = impRecords(); if (!recs.length) return;
   const snap = snapshot();
   const created = {};
@@ -1157,7 +1167,7 @@ function vReport(id) {
   const logs = S.logs.filter((l) => l.machineId === id && !l.skipped).sort((a, b) => a.date.localeCompare(b.date));
   const total = logs.reduce((s, l) => s + (l.cost || 0), 0);
   return `<div class="screen">
-    <div class="hdr sticky no-print"><div class="left">${backBtn('#/m/' + id + '/history')}<div class="h-title sm">Service report</div></div><button class="rbtn" data-act="print" aria-label="Print">${icon('print', 18)}</button></div>
+    <div class="hdr sticky no-print"><div class="left">${backBtn('#/m/' + id + '/history')}<div class="h-title sm">Service report</div></div><button class="smallbtn" data-act="print">${icon('print', 14)} Print</button></div>
     <div><h1 class="big-title">${esc(m.name)}</h1><p class="note">${esc([m.year, m.make, m.model].filter(Boolean).join(' '))}${m.serial ? ' · ' + esc(m.serial) : ''}${hasMeter(m) ? ' · ' + fmtN(m.reading, UNIT_LABEL[m.unit]) : ''} · Report made ${fmtDate(todayISO(), true)}</p></div>
     <div class="card"><div class="kv"><span>Services logged</span><b>${logs.length}</b></div><div class="kv"><span>Total spent</span><b>${money(total) || '$0'}</b></div></div>
     ${logs.length ? `<div class="group">${logs.map((l) => `<div class="lrow"><div class="grow"><div class="t">${esc(l.title)}</div><div class="d">${fmtDate(l.date, true)}${l.reading != null ? ' · ' + fmtN(l.reading, UNIT_LABEL[m.unit]) : ''}${l.shop ? ' · ' + esc(l.shop) : ''}${l.notes ? ' · ' + esc(l.notes) : ''}</div></div><div class="v">${money(l.cost)}</div></div>`).join('')}</div>` : `<p class="note">No services logged yet.</p>`}
@@ -1257,7 +1267,8 @@ function openMachineMenu(id) {
     <button class="lrow" data-act="go-close" data-to="#/m/${id}/edit"><div class="ibox">${icon('edit', 18)}</div><div class="grow"><div class="t">Edit machine</div><div class="d">Name, photo, severe duty</div></div></button>
     ${hasMeter(m) ? `<button class="lrow" data-act="reading" data-id="${id}"><div class="ibox">${icon('gauge', 18)}</div><div class="grow"><div class="t">Update ${m.unit === 'hrs' ? 'hours' : 'odometer'}</div></div></button>` : ''}
     <button class="lrow" data-act="go-close" data-to="#/m/${id}/specs"><div class="ibox">${icon('oil', 18)}</div><div class="grow"><div class="t">Specs & part numbers</div></div></button>
-    <button class="lrow" data-act="go-close" data-to="#/m/${id}/report"><div class="ibox">${icon('print', 18)}</div><div class="grow"><div class="t">Service report</div><div class="d">Print or save a PDF, handy when selling</div></div></button>
+    <button class="lrow" data-act="go-close" data-to="#/log/${id}"><div class="ibox">${icon('print', 18)}</div><div class="grow"><div class="t">Print or save its log</div><div class="d">PDF with history, receipts and photos, handy when selling</div></div></button>
+    <button class="lrow" data-act="csv-close" data-id="${id}"><div class="ibox">${icon('sheet', 18)}</div><div class="grow"><div class="t">Export history to a spreadsheet</div><div class="d">CSV for Excel or Google Sheets</div></div></button>
     <button class="lrow" data-act="ics-machine" data-id="${id}"><div class="ibox">${icon('calendar', 18)}</div><div class="grow"><div class="t">Add to calendar</div></div></button>
     <button class="lrow" data-act="duplicate" data-id="${id}"><div class="ibox">${icon('plus', 18)}</div><div class="grow"><div class="t">Duplicate</div><div class="d">For a second identical machine</div></div></button>
     <button class="lrow" data-act="archive" data-id="${id}"><div class="ibox">${icon('storage', 18)}</div><div class="grow"><div class="t">Archive (sold / retired)</div><div class="d">Keeps its history</div></div></button>
@@ -1397,14 +1408,14 @@ function backupStatus() {
 function backupRow() {
   const b = backupStatus(); if (!b || !b.over) return '';
   return `<div class="mrow urgent backup">
-    <div class="top"><span class="chip warn">${icon('save', 15)}Backup</span><div class="mname" style="text-align:left">Your data</div></div>
-    <div class="mid"><span class="desc">${S.settings.lastBackup ? `Last backup ${humanDays(daysBetween(S.settings.lastBackup, todayISO()))} ago` : 'Never backed up'}</span><span class="meta" style="color:#f3c4c4">${esc((BACKUP_OPTS.find((o) => o[0] === S.settings.backupEvery) || [0, ''])[1])}</span></div>
-    <div class="bigacts"><button class="logl" data-act="backup">Back up now</button><button class="rbtn lg" data-act="backup-snooze" aria-label="Snooze">${icon('snooze', 20)}</button></div>
+    <div class="top"><span class="chip warn">${icon('save', 15)}Backup</span><div class="mname" style="text-align:left">Automatic backup</div></div>
+    <div class="mid"><span class="desc">${backupFresh() ? 'Packed and ready · tap to save it' : S.settings.lastBackup ? `Last backup ${humanDays(daysBetween(S.settings.lastBackup, todayISO()))} ago` : 'Never backed up'}</span><span class="meta" style="color:#f3c4c4">${esc((BACKUP_OPTS.find((o) => o[0] === S.settings.backupEvery) || [0, ''])[1])}</span></div>
+    <div class="bigacts"><button class="logl" data-act="backup-now">Save backup</button><button class="rbtn lg" data-act="backup-snooze" aria-label="Snooze">${icon('snooze', 20)}</button></div>
   </div>`;
 }
 const BACKUP_OPTS = [[14, 'Every 2 weeks'], [30, 'Every month'], [90, 'Every 3 months'], [0, 'Off']];
 function openBackupSnooze() {
-  sheet(`${sheetHead('Backup reminder')}<div class="group">
+  sheet(`${sheetHead('Automatic backup')}<div class="group">
     ${[[1, 'Tomorrow'], [7, 'In a week']].map(([d, l]) => `<button class="lrow" data-act="backup-snooze-set" data-days="${d}"><div class="ibox">${icon('snooze', 18)}</div><div class="grow"><div class="t">${l}</div></div></button>`).join('')}
     ${BACKUP_OPTS.map(([d, l]) => `<button class="lrow" data-act="backup-every" data-v="${d}"><div class="ibox">${icon(d ? 'history' : 'x', 18)}</div><div class="grow"><div class="t">${d ? 'Remind me ' + l.toLowerCase() : 'Turn off backup reminders'}</div></div>${S.settings.backupEvery === d ? icon('check', 18) : ''}</button>`).join('')}
   </div>`);
@@ -1496,7 +1507,7 @@ const ACT = {
   print: () => window.print(),
   'restore-start': () => { const i = document.createElement('input'); i.type = 'file'; i.accept = '.json,application/json'; i.onchange = () => restoreFile(i.files[0]); i.click(); },
   'name-pick': (el) => { const i = $('#garageName'); if (i) { i.value = el.dataset.v; i.focus(); } document.querySelectorAll('.pick').forEach((p) => p.classList.toggle('on', p === el)); },
-  'onb-name': () => { const v = val('garageName'); if (!v) { $('#garageName').focus(); return toast('Give your garage a name'); } S.settings.garage = v; save(); go('#/welcome/5'); },
+  'onb-name': () => { const v = val('garageName'); if (!v) { $('#garageName').focus(); return toast('Give your garage a name'); } S.settings.garage = v; save(); go('#/welcome/6'); },
   'install-tab': (el) => { installTab = el.dataset.v; render(); },
   'install-now': async () => { if (!installEvt) return; installEvt.prompt(); try { await installEvt.userChoice; } catch (e) {} installEvt = null; render(); },
   'install-dismiss': (el, e) => { e.stopPropagation(); S.settings.installDismissed = true; save(); render(); },
@@ -1532,17 +1543,9 @@ const ACT = {
   'imp-suggest': (el) => { imp.suggest = !imp.suggest; el.querySelector('.switch').classList.toggle('on', imp.suggest); },
   'imp-run': () => runImport(),
   'backup-snooze-set': (el) => { S.settings.backupSnooze = addDays(todayISO(), +el.dataset.days); save(); closeSheet(); render(); toast('Backup reminder snoozed'); },
-  'backup-every': (el) => { S.settings.backupEvery = +el.dataset.v; S.settings.backupSnooze = ''; save(); closeSheet(); render(); toast(+el.dataset.v ? 'Backup reminder updated' : 'Backup reminders off'); },
-  'backup-save': async () => {
-    const f = pendingBackup; if (!f) return closeSheet();
-    let shared = false;
-    if (navigator.canShare && navigator.share) {
-      try { if (navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], title: f.name }); shared = true; } }
-      catch (e) { if (e && e.name === 'AbortError') return; }
-    }
-    if (!shared) download(f.name, f);
-    S.settings.lastBackup = todayISO(); S.settings.backupSnooze = ''; save(); closeSheet(); render(); toast('Backup saved');
-  },
+  'backup-every': (el) => { S.settings.backupEvery = +el.dataset.v; S.settings.backupSnooze = ''; save(); closeSheet(); render(); toast(+el.dataset.v ? 'Automatic backup updated' : 'Automatic backup off'); },
+  'backup-save': () => shareBackup(),
+  'backup-now': () => (backupFresh() ? shareBackup() : doBackup()),
   'finish-onboard': async (el) => {
     S.settings.onboarded = true; save();
     if (el.dataset.notify && 'Notification' in window) { try { const p = await Notification.requestPermission(); S.settings.notify = p === 'granted'; save(); } catch (e) {} }
@@ -1768,8 +1771,9 @@ const ACT = {
   'ics-item': (el) => { closeSheet(); downloadICS([I(el.dataset.id)], 'maintenance.ics'); },
   backup: () => doBackup(),
   csv: (el) => downloadCSV(el.dataset.id),
-  'reset-all': () => confirm2('Erase everything?', 'All machines, history, receipts and photos on this phone will be deleted. Make a backup first if you might want it.', 'Erase all data', async () => { S = blank(); S.settings.onboarded = false; save(); if (idb) { const tx = idb.transaction('files', 'readwrite'); tx.objectStore('files').clear(); } go('#/welcome/1'); }),
+  'reset-all': () => confirm2('Erase everything?', 'All machines, history, receipts, photos and restore points on this phone will be deleted. Save a backup file first if you might want any of it.', 'Erase all data', async () => { S = blank(); S.settings.onboarded = false; save(); if (idb) { const tx = idb.transaction('files', 'readwrite'); tx.objectStore('files').clear(); idbDel('kv', 'snaps'); } go('#/welcome/1'); }),
 };
+if (typeof MORE_ACT !== 'undefined') Object.assign(ACT, MORE_ACT);
 function keepDraftFields() {
   if (!draft) return;
   [['name', 'name'], ['make', 'make'], ['model', 'model'], ['year', 'year'], ['serial', 'serial']].forEach(([id, k]) => { const e = document.getElementById(id); if (e) draft[k] = e.value.trim(); });
@@ -1803,26 +1807,49 @@ const CHANGE = {
 /* ======================= exports ======================= */
 function download(name, blob) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
 let pendingBackup = null;
-async function doBackup() {
-  closeSheet();
-  toast('Packing up your data…');
+/* builds the backup file (all data + every photo). Kept ready so "Save backup" can open the share sheet in one tap. */
+async function buildBackup() {
+  const seq = saveSeq;
   const files = {};
   const ids = new Set(allPhotoIds());
   for (const id of ids) { const b = await getPhotoBlob(id); if (b) files[id] = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(b); }); }
   const name = `${(S.settings.garage || 'garage').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'garage'}-backup-${todayISO()}.json`;
-  const json = JSON.stringify({ app: 'bills-garage', ...S, files });
-  try { pendingBackup = new File([json], name, { type: 'application/json' }); } catch (e) { pendingBackup = new Blob([json], { type: 'application/json' }); pendingBackup.name = name; }
-  const t = $('.toast'); if (t) t.remove();
+  const json = JSON.stringify({ app: 'bills-garage', made: new Date().toISOString(), ...S, files });
+  let file;
+  try { file = new File([json], name, { type: 'application/json' }); } catch (e) { file = new Blob([json], { type: 'application/json' }); file.name = name; }
+  pendingBackup = { file, seq, size: json.length, photos: Object.keys(files).length };
+  return pendingBackup;
+}
+const backupFresh = () => pendingBackup && pendingBackup.seq === saveSeq;
+async function doBackup() {
+  closeSheet();
+  if (!backupFresh()) { toast('Packing up your data…'); await buildBackup(); const t = $('.toast'); if (t) t.remove(); }
+  const b = pendingBackup;
   sheet(`${sheetHead('Backup ready')}
-    <div class="card dark stack"><div class="row between"><span class="muted">Machines</span><b>${S.machines.length}</b></div><div class="row between"><span class="muted">Services logged</span><b>${S.logs.length}</b></div><div class="row between"><span class="muted">Photos</span><b>${Object.keys(files).length}</b></div><div class="row between"><span class="muted">Size</span><b>${(json.length / 1048576).toFixed(json.length > 1048576 ? 1 : 2)} MB</b></div></div>
-    <p class="note" style="margin:0">Save it off this phone: iCloud Drive, Google Drive, or email it to yourself.</p>
+    <div class="card dark stack"><div class="row between"><span class="muted">Machines</span><b>${S.machines.length}</b></div><div class="row between"><span class="muted">Services logged</span><b>${S.logs.length}</b></div><div class="row between"><span class="muted">Photos</span><b>${b.photos}</b></div><div class="row between"><span class="muted">Size</span><b>${(b.size / 1048576).toFixed(b.size > 1048576 ? 1 : 2)} MB</b></div></div>
+    <p class="note" style="margin:0">Save it somewhere off this phone: <b style="color:#fff">Save to Files → iCloud Drive</b>, Google Drive, or email it to yourself. One file has everything, photos included.</p>
     <div class="sheet-actions"><button class="btn primary" data-act="backup-save">${icon('save', 18)}Save backup file</button></div>`);
 }
-async function restoreFile(file) {
+async function shareBackup() {
+  const f = pendingBackup && pendingBackup.file; if (!f) return doBackup();
+  let shared = false;
+  if (navigator.canShare && navigator.share) {
+    try { if (navigator.canShare({ files: [f] })) { await navigator.share({ files: [f], title: f.name }); shared = true; } }
+    catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  if (!shared) download(f.name, f);
+  S.settings.lastBackup = todayISO(); S.settings.backupSnooze = ''; save(); closeSheet(); render(); toast('Backup saved');
+}
+async function restoreFile(file, confirmed) {
   if (!file) return;
   try {
     const j = JSON.parse(await file.text());
     if (!j.machines) throw new Error('bad');
+    if (!confirmed && S.machines.length) {
+      const made = j.made ? iso(new Date(j.made)) : j.settings && j.settings.lastBackup; const when = made ? ', saved ' + fmtDate(made, true) : '';
+      return confirm2('Restore this backup?', `It has ${plural(j.machines.length, 'machine')} and ${plural((j.logs || []).length, 'service')}${when}. What’s on this phone now gets swapped out, but a restore point is saved first so you can switch back from Backup & data.`, 'Restore backup', () => restoreFile(file, true), false);
+    }
+    await makeSnapshot('Before restoring a backup');
     for (const [id, d] of Object.entries(j.files || {})) { const b = await (await fetch(d)).blob(); await idbPut('files', id, { type: b.type || 'image/jpeg', buf: await b.arrayBuffer() }); delete urlCache[id]; }
     delete j.files; delete j.app;
     S = Object.assign(blank(), j); S.settings = Object.assign(blank().settings, j.settings || {}, { onboarded: true });
@@ -1862,7 +1889,7 @@ async function checkNotify(force) {
   const over = r.filter((x) => x.st.state === 'over'), soon = r.filter((x) => x.st.state === 'soon');
   const bk = backupStatus();
   if (!over.length && !soon.length) {
-    if (bk && bk.over && S.settings.lastNotify !== todayISO()) { try { const reg = navigator.serviceWorker && (await navigator.serviceWorker.getRegistration()); if (reg) reg.showNotification('Time to back up your garage', { body: 'Takes 10 seconds. Settings → Back up.', icon: 'icon-192.png', tag: 'garage-backup' }); } catch (e) {} S.settings.lastNotify = todayISO(); save(); return; }
+    if (bk && bk.over && S.settings.lastNotify !== todayISO()) { try { const reg = navigator.serviceWorker && (await navigator.serviceWorker.getRegistration()); if (reg) reg.showNotification('Your garage backup is ready', { body: 'One tap to save it. Open the app and tap Save backup.', icon: 'icon-192.png', tag: 'garage-backup' }); } catch (e) {} S.settings.lastNotify = todayISO(); save(); return; }
     if (force) toast('Reminders on. Nothing due right now'); return;
   }
   const title = over.length ? `${plural(over.length, 'thing')} overdue` : `${plural(soon.length, 'thing')} due soon`;
@@ -1895,7 +1922,7 @@ document.addEventListener('input', (e) => {
   if (after !== before) { i.value = after; const pos = Math.max(0, after.length - caretFromEnd); try { i.setSelectionRange(pos, pos); } catch (err) {} }
 }, true);
 document.addEventListener('change', (e) => { const el = e.target.closest('[data-change]'); if (el && CHANGE[el.dataset.change]) CHANGE[el.dataset.change](el, e); });
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { checkNotify(); if (!$('#scrim') && !route().some((x) => ['add', 'custom', 'receipt', 'warranty', 'note', 'fuel', 'specs', 'edit'].includes(x))) render(); } });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { autoSnapshot().catch(() => {}); } if (!document.hidden) { checkNotify(); if (!$('#scrim') && !route().some((x) => ['add', 'custom', 'receipt', 'warranty', 'note', 'fuel', 'specs', 'edit'].includes(x))) render(); } });
 
 /* M splash: plays once per launch, tap to skip */
 function runSplash() {
@@ -1917,8 +1944,13 @@ runSplash();
 (async function boot() {
   await load();
   try { await warmPhotos(); } catch (e) {}
+  try { await autoSnapshot(); } catch (e) {}
   if ('serviceWorker' in navigator) { try { await navigator.serviceWorker.register('sw.js'); } catch (e) {} }
   if (navigator.storage && navigator.storage.persist) { try { navigator.storage.persist(); } catch (e) {} }
   render();
   setTimeout(() => checkNotify(), 1500);
+  /* automatic backup: when one is due, pack it up quietly so saving it is a single tap */
+  setTimeout(() => { const b = backupStatus(); if (b && b.over && !backupFresh()) buildBackup().then(() => { if (!route()[0] || route()[0] === 'data') render(); }).catch(() => {}); }, 2500);
+  /* keep the PDF tool on the phone for offline use */
+  setTimeout(() => { ['vendor/jspdf.umd.min.js', 'vendor/jspdf.plugin.autotable.min.js'].forEach((u) => fetch(u).catch(() => {})); }, 9000);
 })();

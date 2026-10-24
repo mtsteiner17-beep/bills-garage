@@ -28,12 +28,17 @@ It works with no signal after the first load. Everything is saved on the phone i
 - Cats and bird feeders (day-based reminders like seed refills)
 - Pre-trip / before-you-use checklists per machine type
 - Swipe a task left to snooze a week, right to skip
+- Backup & data page: one place for backup, restore, import, PDF, CSV and calendar
+- Automatic backups: restore points saved on the phone each day (and before any restore or import), plus a backup file packed up on a schedule so saving it is one tap
+- Garage log: a printable PDF of every machine with photos, schedule, history, fuel, specs, warranties, notes and receipt photos (Save PDF or Print)
+- "How your data stays safe" page, also shown during setup
+- Feedback form (bugs, ideas). Paste a Web3Forms access key into `WEB3FORMS_KEY` at the top of `more.js` to have it send directly; without one it opens an email
 - Four garage themes: Shop, Pegboard, Diamond plate, Pole barn
 - Loading screen: Masen's "m" mark (loader.mp4 / loader.webm)
 - Icons from Lucide (ISC license)
 
 ## Files
-`index.html`, `styles.css`, `data.js` (the maintenance database), `app.js`, `sw.js` (offline), `manifest.webmanifest`, icons.
+`index.html`, `styles.css`, `data.js` (the maintenance database), `app.js`, `more.js` (backup & data, garage log, feedback), `vendor/` (jsPDF + AutoTable, MIT, for the PDF), `sw.js` (offline), `manifest.webmanifest`, icons.
 Optional: add `lineup.jpg` (the machine lineup image from Figma) to show the panning photo on the welcome screen.
 
 Intervals are general starting points. Check each owner's manual and edit them in the app.
