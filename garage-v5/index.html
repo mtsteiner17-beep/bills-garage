@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Garage">
+<meta name="description" content="Maintenance tracker for trucks, mowers, e-bikes, generators and everything else in the garage.">
+<title>Garage</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png?v=6">
+<link rel="preload" href="fonts/bebas-neue-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="styles.css?v=6">
+</head>
+<body>
+<div id="splash" aria-hidden="true"><video id="splashVid" muted playsinline autoplay preload="auto" disablepictureinpicture><source src="loader.mp4" type="video/mp4"><source src="loader.webm" type="video/webm"></video></div>
+<script>try{if(sessionStorage.getItem('bg-splash')){document.getElementById('splash').remove()}else{sessionStorage.setItem('bg-splash','1')}}catch(e){}</script>
+<div id="app"><div class="screen"></div></div>
+<noscript><p style="padding:24px">This app needs JavaScript turned on.</p></noscript>
+<script src="data.js?v=6"></script>
+<script src="more.js?v=6"></script>
+<script src="app.js?v=6"></script>
+</body>
+</html>
